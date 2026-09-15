@@ -122,9 +122,23 @@ function checkTemplate(exported) {
   // 收集表达式
   const exprs = new Set();
   for (const mm of template.matchAll(/\{\{([\s\S]*?)\}\}/g)) exprs.add(mm[1].trim());
+
+  // 属性类绑定：:foo="expr" / v-bind:foo="expr" / v-if="expr" 等
   for (const mm of template.matchAll(
-    /(?::|v-bind:|@|v-on:|v-if=|v-else-if=|v-for=|v-show=|v-model[.\w]*=)"([^"]*)"/g
+    /(?::|v-bind:|v-if=|v-else-if=|v-for=|v-show=|v-model[.\w]*=)"([^"]*)"/g
   )) exprs.add(mm[1].trim());
+
+  // 事件绑定：@click="expr" / v-on:click="expr" / @mouseenter="expr"
+  // 注意：这里必须取「值」而不是「事件名」，否则模板调用了未导出的方法也检查不出来
+  for (const mm of template.matchAll(
+    /(?:@|v-on:)[\w.:-]+="([^"]*)"/g
+  )) {
+    // 多个语句用 ; 分隔，逐个收集
+    for (const stmt of mm[1].split(';')) {
+      const t = stmt.trim();
+      if (t) exprs.add(t);
+    }
+  }
 
   // v-for 迭代变量
   const loopVars = new Set();
@@ -143,6 +157,8 @@ function checkTemplate(exported) {
     'typeof', 'void', 'delete', 'instanceof', 'this', 'Math', 'Number', 'String',
     'Boolean', 'Array', 'Object', 'JSON', 'Date', 'console', 'window', 'parseInt',
     'parseFloat', 'isNaN', 'encodeURIComponent', 'decodeURIComponent', '$event',
+    // $event 被标识符正则拆出的裸词，属于模板内置变量
+    'event',
   ]);
 
   const used = new Set();
