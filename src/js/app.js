@@ -1212,8 +1212,41 @@ createApp({
     const translateInput = ref('')
     const translateSource = ref('en')
     const translateTarget = ref('zh')
+    const translateAuto = ref(false) // 自动翻译：停止输入后自动开始
     const translateOutput = ref('')
     const isTranslating = ref(false)
+    let translateTimer = null
+
+    // 粗略判断文本语种（自动模式下用于决定 sourceLanguage，避免源=目标）
+    function detectLang(text) {
+      const t = String(text || '')
+      if (/[\u3040-\u30ff]/.test(t)) return 'ja'          // 日文假名
+      if (/[\u4e00-\u9fa5]/.test(t)) return 'zh'          // 中日韩统一表意文字
+      return 'en'
+    }
+
+    // 自动模式下：输入停止 900ms 后自动翻译（内容或目标语言变化时重排）
+    function scheduleAutoTranslate() {
+      clearTimeout(translateTimer)
+      if (!translateAuto.value) return
+      translateTimer = setTimeout(() => {
+        translateTimer = null
+        runTranslate()
+      }, 900)
+    }
+
+    // 切换自动翻译时，若已有内容则立即执行一次
+    function toggleTranslateAuto() {
+      if (translateAuto.value) {
+        translateSource.value = detectLang(translateInput.value)
+        if (translateInput.value.trim()) runTranslate()
+      }
+    }
+
+    // 自动模式下目标语言变化 → 重新翻译
+    function onTranslateTargetChange() {
+      if (translateAuto.value && translateInput.value.trim()) runTranslate()
+    }
 
     // 模式 9：脚本编写 (Script Writer)
     const scriptRequirement = ref('')
@@ -1271,17 +1304,23 @@ createApp({
     // 运行 Translate 学术翻译（优先端侧 Translator API，失败回退 Prompt API）
     async function runTranslate() {
       if (!translateInput.value.trim() || isTranslating.value) return
+      // 入队即快照：排队期间修改输入不应影响已提交的任务
+      const input = translateInput.value
+      const target = translateTarget.value
+      // 自动模式：按内容识别源语言；若识别结果与目标相同则互换，避免"中译中"
+      let source = translateSource.value
+      if (translateAuto.value) {
+        source = detectLang(input)
+        if (source === target) source = target === 'zh' ? 'en' : 'zh'
+      }
       await enqueueStudioTask('translate', async (signal) => {
         isTranslating.value = true
         translateOutput.value = ''
         const record = ensureStudioSession('translate')
         try {
           await ChromeAIService.translate(
-            translateInput.value,
-            {
-              sourceLanguage: translateSource.value,
-              targetLanguage: translateTarget.value,
-            },
+            input,
+            { sourceLanguage: source, targetLanguage: target },
             (chunk) => {
               translateOutput.value = chunk
             },
@@ -1291,13 +1330,18 @@ createApp({
           if (!isAbortError(e, signal)) translateOutput.value = `> ⚠️ **翻译失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
-            input: translateInput.value,
-            options: { from: translateSource.value, to: translateTarget.value },
+            input,
+            options: { from: source, to: target, auto: translateAuto.value },
             output: translateOutput.value,
           })
           isTranslating.value = false
         }
       })
+    }
+
+    // 输入框内容变化：自动模式下防抖触发翻译
+    function onTranslateInput() {
+      scheduleAutoTranslate()
     }
 
     // 运行 Script Writer 脚本编写（Bash / BAT / PowerShell）
@@ -1482,6 +1526,7 @@ createApp({
           translateInput.value = s.input || ''
           if (opt.from) translateSource.value = opt.from
           if (opt.to) translateTarget.value = opt.to
+          if (typeof opt.auto === 'boolean') translateAuto.value = opt.auto
           translateOutput.value = s.output || ''
           break
         case 'script':
@@ -1721,10 +1766,14 @@ createApp({
       translateInput,
       translateSource,
       translateTarget,
+      translateAuto,
       translateOutput,
       isTranslating,
       runTranslate,
       swapTranslateLang,
+      toggleTranslateAuto,
+      onTranslateTargetChange,
+      onTranslateInput,
       // Script
       scriptRequirement,
       scriptType,
