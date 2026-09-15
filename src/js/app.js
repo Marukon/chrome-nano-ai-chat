@@ -1482,6 +1482,9 @@ createApp({
 
     // 初始化：每一步都用 try/catch 包住，任何单点失败都不应导致整页白屏
     onMounted(() => {
+      // 解除挂载前保护：此前用 CSS 藏住弹窗，避免模板原文裸露造成"一闪而过"
+      document.documentElement.classList.add('mounted')
+
       console.log('[NanoAI] 应用已挂载，开始初始化')
 
       try {

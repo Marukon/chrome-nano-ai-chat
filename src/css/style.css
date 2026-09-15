@@ -940,6 +940,13 @@ body {
   box-shadow: var(--shadow-md);
 }
 
+/* 挂载前保护：Vue 接管之前 v-if 尚未生效，模板里的弹窗内容会先裸露一帧
+   再被移除，表现为"弹窗一闪而过"。
+   html.mounted 由 Vue 挂载完成后加上，此后由 v-if 正常控制显隐。 */
+html:not(.mounted) .modal-backdrop {
+  display: none;
+}
+
 /* 模态弹窗 */
 .modal-backdrop {
   position: fixed;
