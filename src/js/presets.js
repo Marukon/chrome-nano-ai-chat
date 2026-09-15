@@ -13,7 +13,8 @@ export const MODE_META = {
   translate: { icon: '🌐', label: '中英互译' },
   dict: { icon: '📖', label: '单词查询' },
   polish: { icon: '🪄', label: '通用润色' },
-  rewrite: { icon: '🔄', label: '内容降重' },
+  rewrite: { icon: '🔄', label: '改写降重' },
+  wash: { icon: '🫧', label: '洗稿' },
   codereview: { icon: '💻', label: '代码审查' },
   script: { icon: '🧩', label: '脚本编写' },
 }
@@ -26,13 +27,13 @@ export const MODE_GROUPS = [
     id: 'paper',
     label: '学术与文献',
     icon: '📄',
-    modes: ['summarizer', 'rewriter', 'rebuttal'],
+    modes: ['summarizer', 'rewriter', 'rewrite', 'rebuttal'],
   },
   {
     id: 'drafting',
     label: '文字处理',
     icon: '✍️',
-    modes: ['writer', 'outline', 'extract', 'polish', 'rewrite', 'proofread', 'translate', 'dict'],
+    modes: ['writer', 'outline', 'wash', 'extract', 'polish', 'proofread', 'translate', 'dict'],
   },
   {
     id: 'code',

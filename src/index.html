@@ -408,11 +408,11 @@
         </div>
       </section>
 
-      <!-- 模式：内容降重 (Rewrite) -->
+      <!-- 模式：改写降重 (Rewrite，学术与文献组) -->
       <section v-if="currentMode === 'rewrite'" class="studio-container">
         <div class="glass-card studio-card">
           <div class="studio-card-header">
-            <span style="font-weight:600;font-size:0.95rem;">🔄 输入需要降重的文字</span>
+            <span style="font-weight:600;font-size:0.95rem;">🔄 输入需要降重的学术文字</span>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               <select v-model="rewriteSrcStrength" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
                 <option value="light">轻度（同义替换）</option>
@@ -425,7 +425,7 @@
             <textarea
               v-model="rewriteSrcInput"
               class="studio-textarea"
-              placeholder="粘贴需要降低文字重合度的段落（论文、报告、文案均可）。改写会严格保留事实、数据与观点，只重构表达方式..."
+              placeholder="粘贴需要降低查重重合度的论文段落。改写会严格保留事实、数据、观点与引用标注，仅重构学术表达方式..."
             ></textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:12px;">
               <button v-if="isRewriteSrcRunning" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
@@ -433,7 +433,7 @@
                 <span>停止生成</span>
               </button>
               <button v-else class="btn-new-chat" style="margin:0;" :disabled="!rewriteSrcInput.trim()" @click="runRewrite()">
-                <span>🚀 开始降重改写</span>
+                <span>🚀 开始改写降重</span>
               </button>
             </div>
           </div>
@@ -450,6 +450,76 @@
             <div v-if="rewriteSrcOutput" class="markdown-body" v-html="renderMarkdown(rewriteSrcOutput)"></div>
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
               改写后的段落将在此呈现，可逐段替换原文
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 模式：洗稿 (Wash，文字处理组) -->
+      <section v-if="currentMode === 'wash'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🫧 输入原文</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <select v-model="washStyle" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="wechat">公众号长文</option>
+                <option value="xiaohongshu">小红书笔记</option>
+                <option value="toutiao">资讯平台</option>
+                <option value="zhihu">知乎回答</option>
+              </select>
+            </div>
+          </div>
+          <div class="studio-card-body">
+            <textarea
+              v-model="washInput"
+              class="studio-textarea"
+              placeholder="粘贴一篇要洗的文章或素材。会保留全部信息点与核心观点、数据与人名不变，按所选平台调性重新组织语言和结构..."
+            ></textarea>
+            <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+              <button v-if="isWashing" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!washInput.trim()" @click="runWash()">
+                <span>🚀 开始洗稿</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">📝 洗稿成品</span>
+            <div style="display:flex;gap:8px;">
+              <button v-if="washOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(washOutput)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              </button>
+            </div>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="washOutput" class="markdown-body" v-html="renderMarkdown(washOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              按目标平台调性重写好的成品将在此呈现
+            </div>
+            <!-- 一键换风格：用当前成品作为素材继续迭代 -->
+            <div v-if="washOutput && !isWashing" class="writer-scenes" style="margin-top:12px;">
+              <span style="font-size:0.74rem;color:var(--text-muted);align-self:center;">再洗一版：</span>
+              <button class="writer-scene-chip" @click="washAgainWithStyle('wechat')">公众号</button>
+              <button class="writer-scene-chip" @click="washAgainWithStyle('xiaohongshu')">小红书</button>
+              <button class="writer-scene-chip" @click="washAgainWithStyle('toutiao')">资讯平台</button>
+              <button class="writer-scene-chip" @click="washAgainWithStyle('zhihu')">知乎</button>
+            </div>
+            <div v-if="washHistory.length" style="margin-top:12px;font-size:0.74rem;color:var(--text-muted);">
+              已生成 {{ washHistory.length }} 个版本（点击下方可回看）
+              <div class="writer-scenes" style="margin-top:6px;">
+                <button
+                  v-for="(h, i) in washHistory"
+                  :key="h.at"
+                  class="writer-scene-chip"
+                  @click="copyToClipboard(h.text)"
+                  :title="'复制第 ' + (washHistory.length - i) + ' 版'"
+                >第 {{ washHistory.length - i }} 版 · {{ {wechat:'公众号',xiaohongshu:'小红书',toutiao:'资讯',zhihu:'知乎'}[h.style] }}</button>
+              </div>
             </div>
           </div>
         </div>

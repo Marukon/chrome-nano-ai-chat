@@ -92,11 +92,18 @@ createApp({
     const polishOutput = ref('')
     const isPolishing = ref(false)
 
-    // 内容降重 (Rewrite)
+    // 改写降重 (Rewrite，学术向)
     const rewriteSrcInput = ref('')
     const rewriteSrcStrength = ref('medium') // light | medium | strong
     const rewriteSrcOutput = ref('')
     const isRewriteSrcRunning = ref(false)
+
+    // 洗稿 (Wash，自媒体文案向)
+    const washInput = ref('')
+    const washStyle = ref('wechat') // wechat | xiaohongshu | toutiao | zhihu
+    const washOutput = ref('')
+    const washHistory = ref([]) // 迭代洗稿版本
+    const isWashing = ref(false)
 
     // 单词查询 (Dictionary)
     const dictWord = ref('')
@@ -154,6 +161,7 @@ createApp({
       isOutlining.value = false
       isPolishing.value = false
       isRewriteSrcRunning.value = false
+      isWashing.value = false
       isDictRunning.value = false
       isRewriting.value = false
       isWriting.value = false
@@ -589,6 +597,7 @@ createApp({
         isOutlining.value = false
         isPolishing.value = false
         isRewriteSrcRunning.value = false
+        isWashing.value = false
         isDictRunning.value = false
         isRewriting.value = false
         isWriting.value = false
@@ -764,7 +773,7 @@ createApp({
       }
     }
 
-    // 运行 内容降重 (Rewrite)：改写表达、降低文字重合度
+    // 运行 改写降重 (Rewrite)：学术论文向，改写表达、降低查重文字重合度
     async function runRewrite() {
       if (!rewriteSrcInput.value.trim() || isRewriteSrcRunning.value) return
       isRewriteSrcRunning.value = true
@@ -776,18 +785,19 @@ createApp({
         medium: '中度改写：重构句式与段落组织，明显降低文字重合度',
         strong: '深度改写：重新组织论述结构与表达方式，最大幅度降低重合度',
       }[rewriteSrcStrength.value]
-      const prompt = `请对以下文字进行降重改写（${strengthText}）。\n\n` +
+      const prompt = `请对以下学术文字进行改写降重（${strengthText}）。\n\n` +
         `硬性要求：\n` +
         `1. 严格保留原文的事实、数据、观点与结论，不得增删或歪曲；\n` +
-        `2. 专有名词、术语、公式、引用标注保持原样；\n` +
-        `3. 变换句式结构（主动/被动互换、长短句重组）、替换同义表达、调整逻辑连接词；\n` +
+        `2. 专有名词、术语、公式、引用标注（如 [1]、参考文献编号）保持原样；\n` +
+        `3. 变换句式结构（主动/被动互换、长短句重组）、替换同义学术表达、调整逻辑连接词；\n` +
         `4. 段落数量与先后顺序尽量与原文对应，便于逐段替换；\n` +
-        `5. 只输出改写后的正文，不要解释改写手法。\n\n` +
+        `5. 保持学术语体的严谨客观，不要口语化、不要添加原文没有的论断；\n` +
+        `6. 只输出改写后的正文，不要解释改写手法。\n\n` +
         `【原文】：\n${rewriteSrcInput.value}`
 
       try {
         const session = await ChromeAIService.createChatSession({
-          systemPrompt: '你是一位专业的中英文字改写专家，擅长在完全保留原意与事实的前提下重构表达方式、降低文字重合度。只输出改写后的成品。'
+          systemPrompt: '你是一位专业的学术文字改写专家，擅长在完全保留原意、数据与引用标注的前提下重构表达方式、降低查重文字重合度。只输出改写后的成品。'
         })
         await ChromeAIService.streamPrompt(
           session,
@@ -798,7 +808,7 @@ createApp({
           runCtrl.signal
         )
       } catch (e) {
-        rewriteSrcOutput.value = `> ⚠️ **降重失败**：${e.message}`
+        rewriteSrcOutput.value = `> ⚠️ **改写降重失败**：${e.message}`
       } finally {
         persistStudioSession(record, {
           input: rewriteSrcInput.value,
@@ -808,6 +818,69 @@ createApp({
         isRewriteSrcRunning.value = false
         if (studioAbort.value === runCtrl) studioAbort.value = null
       }
+    }
+
+    // 运行 洗稿 (Wash)：自媒体文案向，保留信息点重写表达
+    async function runWash() {
+      if (!washInput.value.trim() || isWashing.value) return
+      isWashing.value = true
+      washOutput.value = ''
+      const record = ensureStudioSession('wash')
+      const runCtrl = beginStudioRun()
+      const styleText = {
+        wechat: '微信公众号长文：有小标题、段落短、节奏舒服，开头三行内抓住读者',
+        xiaohongshu: '小红书笔记：口语化、有 emoji 分点、像分享经验，结尾自然引导互动',
+        toutiao: '资讯平台文章：客观叙述、信息密度高、结论前置',
+        zhihu: '知乎回答：先给结论，再分点论证，理性克制，可举例说明',
+      }[washStyle.value]
+      const prompt = `请对以下内容进行洗稿改写，目标风格：${styleText}。\n\n` +
+        `要求：\n` +
+        `1. 保留原文的全部信息点与核心观点，不新增未经证实的说法，不扭曲原意；\n` +
+        `2. 重新组织语言与段落结构，换掉原文的句式与措辞，不要逐句替换的同义词式改写；\n` +
+        `3. 调整叙述角度与顺序，使文章读起来是重新写的，而不是原文的复制；\n` +
+        `4. 涉及的具体数据、人名、机构名、时间必须与原文一致，不得改动；\n` +
+        `5. 直接输出成品，不要解释改写思路，不要加"以下是"之类的前后缀。\n\n` +
+        `【原文】：\n${washInput.value}`
+
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: '你是一位资深内容编辑，擅长把一篇文章按目标平台的调性重新组织语言与结构，同时完整保留原文的信息与事实。'
+        })
+        await ChromeAIService.streamPrompt(
+          session,
+          prompt,
+          ({ full }) => {
+            washOutput.value = full
+          },
+          runCtrl.signal
+        )
+      } catch (e) {
+        washOutput.value = `> ⚠️ **洗稿失败**：${e.message}`
+      } finally {
+        persistStudioSession(record, {
+          input: washInput.value,
+          options: { style: washStyle.value },
+          output: washOutput.value,
+        })
+        // 记录本次版本，便于对比与迭代
+        if (washOutput.value && !washOutput.value.startsWith('> ⚠️')) {
+          washHistory.value = [
+            { style: washStyle.value, text: washOutput.value, at: Date.now() },
+            ...washHistory.value,
+          ].slice(0, 6)
+        }
+        isWashing.value = false
+        if (studioAbort.value === runCtrl) studioAbort.value = null
+      }
+    }
+
+    // 换一个平台风格，用上一版结果继续洗
+    function washAgainWithStyle(style) {
+      washStyle.value = style
+      if (washOutput.value && !washOutput.value.startsWith('> ⚠️')) {
+        washInput.value = washOutput.value
+      }
+      showToast('已切换风格并用上一版结果继续洗稿')
     }
 
     // 运行 单词查询 (Dictionary)：英汉双向词典式释义
@@ -1282,6 +1355,11 @@ createApp({
           dictWord.value = s.input || ''
           dictOutput.value = s.output || ''
           break
+        case 'wash':
+          washInput.value = s.input || ''
+          if (opt.style) washStyle.value = opt.style
+          washOutput.value = s.output || ''
+          break
         case 'outline':
           outlineTopic.value = s.input || ''
           if (opt.type) outlineType.value = opt.type
@@ -1429,12 +1507,20 @@ createApp({
       polishOutput,
       isPolishing,
       runPolish,
-      // Rewrite（内容降重）
+      // Rewrite（改写降重，学术向）
       rewriteSrcInput,
       rewriteSrcStrength,
       rewriteSrcOutput,
       isRewriteSrcRunning,
       runRewrite,
+      // Wash（洗稿，自媒体向）
+      washInput,
+      washStyle,
+      washOutput,
+      washHistory,
+      isWashing,
+      runWash,
+      washAgainWithStyle,
       // Dictionary（单词查询）
       dictWord,
       dictOutput,
