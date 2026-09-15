@@ -1,12 +1,12 @@
 {
   "name": "chrome-nano-ai-chat",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "A modern on-device AI workspace powered by Chrome Built-in Gemini Nano",
   "scripts": {
-    "build": "python build.py",
-    "build:node": "node scripts/build.js",
-    "dev": "python build.py && npx serve .",
+    "build": "node scripts/build.js",
+    "clean": "node scripts/build.js --clean",
+    "dev": "node scripts/build.js && npx serve .",
     "start": "npx serve ."
   },
   "keywords": [
@@ -18,5 +18,8 @@
     "rewriter-api"
   ],
   "author": "Maruko",
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
 }

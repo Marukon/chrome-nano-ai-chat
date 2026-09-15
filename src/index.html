@@ -2,8 +2,13 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Nano AI Chat - 端侧大模型工作台 (Chrome & Edge)</title>
+
+  <!-- 站点图标（由构建脚本从 src/ 复制到根目录） -->
+  <link rel="icon" href="./favicon.ico" sizes="16x16 32x32 48x48 64x64 128x128 256x256">
+  <link rel="icon" type="image/png" sizes="180x180" href="./apple-touch-icon.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
 
   <!-- 100% 本地自托管样式库 (无任何外部 CDN 依赖) -->
   <link rel="stylesheet" href="./assets/vendor/katex/katex.min.css">
@@ -12,6 +17,9 @@
 </head>
 <body>
   <div id="app" v-cloak>
+    <!-- 窄屏侧边栏遮罩（点击收起抽屉） -->
+    <div class="sidebar-backdrop" :class="{ show: sidebarOpen }" @click="sidebarOpen = false"></div>
+
     <!-- 左侧会话导航栏 -->
     <aside class="sidebar" :class="{ open: sidebarOpen }">
       <div class="sidebar-header">
@@ -67,7 +75,7 @@
         </div>
 
         <!-- 角色预设与设定 -->
-        <button class="btn-new-chat" style="margin:4px 0 0;background:rgba(125,125,125,0.08);color:var(--text-primary);border-color:var(--border-color);" @click="roleModalOpen = true">
+        <button class="btn-new-chat" style="margin:4px 0 0;background:rgba(125,125,125,0.08);color:var(--text-primary);border-color:var(--border-color);" title="切换全局角色设定（对自由对话与全部工具同时生效）" @click="roleModalOpen = true">
           <span>{{ currentRole.avatar }} {{ currentRole.name }}</span>
         </button>
       </div>
@@ -77,38 +85,44 @@
     <main class="main-content">
       <!-- 顶栏导航 -->
       <header class="top-navbar">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <button class="icon-button" @click="sidebarOpen = !sidebarOpen" title="展开/收起侧边栏">
+        <div class="navbar-left">
+          <button class="icon-button nav-toggle" @click="sidebarOpen = !sidebarOpen" title="展开/收起侧边栏">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
           </button>
 
-          <!-- 模式切换 Tabs -->
+          <!-- 模式切换 Tabs（窄屏自动折叠为纯图标） -->
           <nav class="nav-tabs">
-            <button class="nav-tab" :class="{ active: currentMode === 'chat' }" @click="setMode('chat')">
-              <span>💬 自由对话</span>
+            <button class="nav-tab" :class="{ active: currentMode === 'chat' }" @click="setMode('chat')" title="自由对话">
+              <span class="tab-emoji">💬</span><span class="tab-label">自由对话</span>
             </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'summarizer' }" @click="setMode('summarizer')">
-              <span>📝 论文摘要</span>
+            <button class="nav-tab" :class="{ active: currentMode === 'summarizer' }" @click="setMode('summarizer')" title="论文摘要">
+              <span class="tab-emoji">📝</span><span class="tab-label">论文摘要</span>
             </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'rewriter' }" @click="setMode('rewriter')">
-              <span>✨ 学术润色</span>
+            <button class="nav-tab" :class="{ active: currentMode === 'rewriter' }" @click="setMode('rewriter')" title="学术润色">
+              <span class="tab-emoji">✨</span><span class="tab-label">学术润色</span>
             </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'writer' }" @click="setMode('writer')">
-              <span>✍️ 辅助起草</span>
+            <button class="nav-tab" :class="{ active: currentMode === 'writer' }" @click="setMode('writer')" title="辅助起草">
+              <span class="tab-emoji">✍️</span><span class="tab-label">辅助起草</span>
             </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'rebuttal' }" @click="setMode('rebuttal')">
-              <span>🛡️ 审稿答辩</span>
+            <button class="nav-tab" :class="{ active: currentMode === 'rebuttal' }" @click="setMode('rebuttal')" title="审稿答辩">
+              <span class="tab-emoji">🛡️</span><span class="tab-label">审稿答辩</span>
             </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'proofread' }" @click="setMode('proofread')">
-              <span>🔍 语法纠错</span>
+            <button class="nav-tab" :class="{ active: currentMode === 'proofread' }" @click="setMode('proofread')" title="语法纠错">
+              <span class="tab-emoji">🔍</span><span class="tab-label">语法纠错</span>
             </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'codereview' }" @click="setMode('codereview')">
-              <span>💻 代码审查</span>
+            <button class="nav-tab" :class="{ active: currentMode === 'codereview' }" @click="setMode('codereview')" title="代码审查">
+              <span class="tab-emoji">💻</span><span class="tab-label">代码审查</span>
             </button>
           </nav>
         </div>
 
         <div class="nav-actions">
+          <!-- 全局角色指示（对所有功能生效） -->
+          <div v-show="currentMode !== 'chat'" class="role-badge" title="当前全局角色设定，对自由对话与全部工具同时生效，点击切换" @click="roleModalOpen = true">
+            <span>{{ currentRole.avatar }}</span>
+            <span>{{ currentRole.name }}</span>
+          </div>
+
           <!-- 端侧 AI 状态指示胶囊 -->
           <button
             class="status-pill"
@@ -121,9 +135,9 @@
             @click="settingsModalOpen = true"
           >
             <span class="status-dot"></span>
-            <span v-if="aiStatus.prompt === 'available'">端侧大模型已就绪</span>
-            <span v-else-if="aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'">端侧翻译可用 / 对话模型待开启</span>
-            <span v-else>端侧模型待配置</span>
+            <span v-if="aiStatus.prompt === 'available'" class="status-check">✓</span>
+            <span v-else-if="aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'">仅翻译</span>
+            <span v-else>待配置</span>
           </button>
 
           <!-- 导出按钮 -->
@@ -143,7 +157,7 @@
 
       <!-- 模式 1：自由对话 (Chat) -->
       <section v-if="currentMode === 'chat'" style="flex:1;display:flex;flex-direction:column;position:relative;overflow:hidden;">
-        <div ref="chatContainerRef" class="chat-container">
+        <div ref="chatContainerRef" class="chat-container" @scroll="onChatScroll">
           <!-- 初始欢迎界面 -->
           <div v-if="!activeSession || activeSession.messages.length === 0" class="hero-container">
             <div class="brand-icon" style="width:52px;height:52px;font-size:1.8rem;border-radius:18px;">⚡</div>
@@ -205,15 +219,23 @@
           </div>
         </div>
 
+        <!-- 自由滚动锁：生成中向上翻看历史时，提供一键回到最新 -->
+        <button v-if="!isNearBottom" class="scroll-latest-btn" title="回到最新消息" @click="forceScrollToBottom()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+          <span>回到最新</span>
+        </button>
+
         <!-- 浮动输入框 -->
         <div class="input-dock">
           <div class="input-box">
             <textarea
+              ref="inputRef"
               v-model="currentInput"
               class="chat-textarea"
               placeholder="输入你的问题或粘贴学术论文段落... (Enter 发送，Shift+Enter 换行)"
               rows="1"
-              @keydown.enter.exact.prevent="sendMessage()"
+              @input="autoGrowInput()"
+              @keydown.enter.exact="handleEnterKey($event)"
             ></textarea>
             <div class="input-toolbar">
               <div class="role-badge" @click="roleModalOpen = true">
@@ -438,7 +460,7 @@
         <div class="glass-card studio-card">
           <div class="studio-card-header">
             <span style="font-weight:600;font-size:0.95rem;">🔍 输入待查错论文段落</span>
-            <div style="display:gap:8px;">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
               <select v-model="proofreadStandard" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
                 <option value="strict">顶级国际期刊出版级 (Strict Journal Standard)</option>
                 <option value="clarity">学术清晰度与通畅 (Clarity & Flow)</option>
@@ -539,7 +561,7 @@
             class="session-item"
             :class="{ active: currentRole.id === role.id }"
             style="padding:12px 14px;border-radius:12px;"
-            @click="createNewSession(role.id); roleModalOpen = false"
+            @click="applyRole(role.id)"
           >
             <div style="display:flex;align-items:center;gap:12px;">
               <span style="font-size:1.4rem;">{{ role.avatar }}</span>
@@ -577,6 +599,7 @@
               </button>
             </div>
 
+            <div class="table-scroll">
             <table class="diag-table">
               <thead>
                 <tr>
@@ -628,6 +651,7 @@
                 </tr>
               </tbody>
             </table>
+            </div>
 
             <!-- 端侧翻译实测工具 (证明端侧 AI 算力正常) -->
             <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border-color);">
@@ -683,10 +707,15 @@
                 <input v-model.number="settings.topK" type="range" min="1" max="10" step="1" style="width:100%;cursor:pointer;">
               </div>
             </div>
+            <div style="font-size:0.76rem;color:var(--text-muted);margin-top:4px;">
+              参数会自动保存，并应用于之后新建的对话（会话创建后模型参数不可动态修改）。
+            </div>
           </div>
         </div>
       </div>
     </div>
+    <!-- 全局轻提示 -->
+    <div v-if="toast" class="app-toast">{{ toast }}</div>
   </div>
 
   <!-- 100% 本地自承载公共库脚本 -->

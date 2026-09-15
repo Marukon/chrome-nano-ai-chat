@@ -12,6 +12,18 @@ import {
   exportSessionToMarkdown
 } from './storage.js'
 
+// marked 全局配置（只需设置一次，避免每次渲染重复执行）
+marked.setOptions({
+  highlight: function (code, lang) {
+    if (window.hljs) {
+      const language = window.hljs.getLanguage(lang) ? lang : 'plaintext'
+      return window.hljs.highlight(code, { language }).value
+    }
+    return code
+  },
+  breaks: true
+})
+
 createApp({
   setup() {
     // 状态定义
@@ -19,7 +31,8 @@ createApp({
     const settings = ref(loadSettings())
     const sessions = ref(loadSessions())
     const activeSessionId = ref(loadActiveSessionId())
-    const sidebarOpen = ref(true)
+    // 窄屏（≤1024px）侧边栏为抽屉模式，默认收起；宽屏默认展开
+    const sidebarOpen = ref(window.innerWidth > 1024)
     const settingsModalOpen = ref(false)
     const roleModalOpen = ref(false)
 
@@ -37,8 +50,13 @@ createApp({
     const activeAiSession = ref(null)
     const abortController = ref(null)
     const chatContainerRef = ref(null)
+    const inputRef = ref(null)
+    const toast = ref('')
+    let toastTimer = null
     const currentTokensSoFar = ref(0)
     const maxTokensLimit = ref(4096)
+    // 滚动锁：只有用户停留在底部附近时才自动跟随最新内容
+    const isNearBottom = ref(true)
 
     // Summarizer 模式状态
     const summarizeInput = ref('')
@@ -74,9 +92,21 @@ createApp({
       return ROLE_PRESETS.find(r => r.id === roleId) || ROLE_PRESETS[0]
     })
 
+    // 全局角色上下文：左下角选定的角色对「自由对话」与所有 Studio 功能同时生效
+    const roleContextPrompt = computed(() => {
+      return `【全局角色风格要求】用户当前选定的专业角色为「${currentRole.value.name}」（${currentRole.value.desc}）。` +
+        `请在保证本任务专业性与准确性的前提下，遵循该角色的表达风格与侧重点：${currentRole.value.systemPrompt}`
+    })
+
     // Markdown 解析与 LaTeX 公式渲染器
+    // 渲染结果缓存：流式输出时每帧都会重算整条消息，
+    // 没有缓存会导致长对话里每条消息都重复跑 marked + KaTeX，明显掉帧。
+    const markdownCache = new Map()
+    const MARKDOWN_CACHE_LIMIT = 300
+
     function renderMarkdown(content) {
       if (!content) return ''
+      if (markdownCache.has(content)) return markdownCache.get(content)
 
       try {
         // 先保护并渲染 LaTeX 公式: $$...$$ 与 $...$
@@ -101,19 +131,11 @@ createApp({
           return `$${equation}$`
         })
 
-        // 配置代码高亮
-        marked.setOptions({
-          highlight: function (code, lang) {
-            if (window.hljs) {
-              const language = hljs.getLanguage(lang) ? lang : 'plaintext'
-              return hljs.highlight(code, { language }).value
-            }
-            return code
-          },
-          breaks: true
-        })
-
-        return marked.parse(processed)
+        // 配置代码高亮（已在模块初始化时统一设置）
+        const html = marked.parse(processed)
+        if (markdownCache.size >= MARKDOWN_CACHE_LIMIT) markdownCache.clear()
+        markdownCache.set(content, html)
+        return html
       } catch (e) {
         console.error('Markdown parse error:', e)
         return content
@@ -152,16 +174,18 @@ createApp({
       currentTokensSoFar.value = 0
       saveSessions(sessions.value)
       saveActiveSessionId(newSession.id)
-      scrollToBottom()
+      if (window.innerWidth <= 1024) sidebarOpen.value = false
+      scrollToBottom(true)
     }
 
-    // 选择会话
+    // 选择会话（窄屏下自动收起抽屉）
     function selectSession(id) {
       activeSessionId.value = id
       saveActiveSessionId(id)
+      if (window.innerWidth <= 1024) sidebarOpen.value = false
       activeAiSession.value = null
       currentTokensSoFar.value = 0
-      scrollToBottom()
+      scrollToBottom(true)
     }
 
     // 删除会话
@@ -191,13 +215,30 @@ createApp({
       selectSession(cloned.id)
     }
 
-    // 滚动至最新消息
-    function scrollToBottom() {
+    // 判断滚动位置是否贴近底部（阈值 80px）
+    function onChatScroll() {
+      const el = chatContainerRef.value
+      if (!el) return
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+      isNearBottom.value = distance <= 80
+    }
+
+    // 滚动至最新消息：force=true 时无视滚动锁强制置底
+    function scrollToBottom(force = false) {
       nextTick(() => {
-        if (chatContainerRef.value) {
-          chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight
+        const el = chatContainerRef.value
+        if (!el) return
+        if (force || isNearBottom.value) {
+          el.scrollTop = el.scrollHeight
+          isNearBottom.value = true
         }
       })
+    }
+
+    // 一键回到最新并重新开启自动跟随
+    function forceScrollToBottom() {
+      isNearBottom.value = true
+      scrollToBottom(true)
     }
 
     // 发送消息
@@ -218,6 +259,7 @@ createApp({
       }
       activeSession.value.messages.push(userMsg)
       currentInput.value = ''
+      nextTick(autoGrowInput)
 
       // 首条消息自动命名会话
       if (activeSession.value.messages.length === 1 || activeSession.value.title === '新对话') {
@@ -235,7 +277,8 @@ createApp({
 
       isGenerating.value = true
       abortController.value = new AbortController()
-      scrollToBottom()
+      isNearBottom.value = true
+      scrollToBottom(true)
 
       try {
         // 创建或复用 Chrome AI Session
@@ -261,6 +304,10 @@ createApp({
           text,
           ({ full }) => {
             aiMsg.content = full
+            // 实时刷新上下文占用表盘
+            if (activeAiSession.value?.tokensSoFar) {
+              currentTokensSoFar.value = activeAiSession.value.tokensSoFar
+            }
             scrollToBottom()
           },
           abortController.value.signal
@@ -276,7 +323,10 @@ createApp({
         }
       } finally {
         isGenerating.value = false
-        activeSession.value.updatedAt = Date.now()
+        // 生成过程中会话可能已被删除，需判空
+        if (activeSession.value) {
+          activeSession.value.updatedAt = Date.now()
+        }
         saveSessions(sessions.value)
         scrollToBottom()
       }
@@ -298,15 +348,75 @@ createApp({
       saveSettings(settings.value)
     }
 
-    // 一键复制
+    // 轻量提示条
+    function showToast(message) {
+      toast.value = message
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => {
+        toast.value = ''
+      }, 1800)
+    }
+
+    // 一键复制（兼容 http 非安全上下文：navigator.clipboard 不可用）
     async function copyToClipboard(text) {
       if (!text) return
-      await navigator.clipboard.writeText(text)
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text)
+          showToast('✅ 已复制到剪贴板')
+          return
+        }
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.top = '-1000px'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        const ok = document.execCommand('copy')
+        document.body.removeChild(ta)
+        showToast(ok ? '✅ 已复制到剪贴板' : '⚠️ 复制失败，请手动选中复制')
+      } catch (e) {
+        console.warn('复制失败:', e)
+        showToast('⚠️ 复制失败，请手动选中复制')
+      }
+    }
+
+    // 输入框随内容自动增高（上限 180px，超出内部滚动）
+    function autoGrowInput() {
+      const el = inputRef.value
+      if (!el) return
+      el.style.height = 'auto'
+      el.style.height = Math.min(el.scrollHeight, 180) + 'px'
+    }
+
+    // 回车发送：中文/日文输入法组词过程中的回车不能误触发发送
+    function handleEnterKey(event) {
+      if (event.isComposing || event.keyCode === 229) return
+      event.preventDefault()
+      sendMessage()
+    }
+
+    // 切换角色：当前会话为空则直接改角色，否则新建会话，避免堆积空会话
+    function applyRole(roleId) {
+      roleModalOpen.value = false
+      const role = ROLE_PRESETS.find(r => r.id === roleId) || ROLE_PRESETS[0]
+      const current = activeSession.value
+      if (current && (!current.messages || current.messages.length === 0)) {
+        current.roleId = role.id
+        current.systemPrompt = role.systemPrompt
+        current.updatedAt = Date.now()
+        activeAiSession.value = null
+        saveSessions(sessions.value)
+        return
+      }
+      createNewSession(role.id)
     }
 
     // 快速填入示例问题
     function useQuickPrompt(promptText) {
       currentInput.value = promptText
+      nextTick(autoGrowInput)
       sendMessage()
     }
 
@@ -322,6 +432,7 @@ createApp({
             type: summarizeType.value,
             length: summarizeLength.value,
             format: summarizeFormat.value,
+            sharedContext: roleContextPrompt.value,
           },
           (chunk) => {
             summarizeOutput.value = chunk
@@ -345,6 +456,7 @@ createApp({
           {
             tone: rewriteTone.value,
             length: rewriteLength.value,
+            sharedContext: roleContextPrompt.value,
           },
           (chunk) => {
             rewriteOutput.value = chunk
@@ -369,6 +481,7 @@ createApp({
             tone: writeTone.value,
             length: writeLength.value,
             context: writeContext.value,
+            roleContext: roleContextPrompt.value,
           },
           (chunk) => {
             writeOutput.value = chunk
@@ -401,6 +514,7 @@ createApp({
       try {
         const session = await ChromeAIService.createChatSession({
           systemPrompt: 'You are an expert academic author skilled in peer-review rebuttal for top-tier venues like IEEE, ACM, Nature, and NeurIPS.'
+            + '\n\n' + roleContextPrompt.value
         })
         await ChromeAIService.streamPrompt(
           session,
@@ -435,6 +549,7 @@ createApp({
       try {
         const session = await ChromeAIService.createChatSession({
           systemPrompt: 'You are a professional academic copyeditor and grammarian for Nature and IEEE publications.'
+            + '\n\n' + roleContextPrompt.value
         })
         await ChromeAIService.streamPrompt(
           session,
@@ -471,6 +586,7 @@ createApp({
       try {
         const session = await ChromeAIService.createChatSession({
           systemPrompt: 'You are a principal software engineer and security auditor.'
+            + '\n\n' + roleContextPrompt.value
         })
         await ChromeAIService.streamPrompt(
           session,
@@ -520,6 +636,11 @@ createApp({
       }, 2500)
     }
 
+    // 设置项持久化：否则调完采样参数刷新页面就丢了
+    watch(settings, (val) => {
+      saveSettings(val)
+    }, { deep: true })
+
     // 初始化
     onMounted(() => {
       // 设置主题
@@ -529,6 +650,16 @@ createApp({
       document.documentElement.setAttribute('data-theme', initialTheme)
 
       checkSystemAI()
+
+      // 视口跨越 1024px 断点时，自动切换侧边栏形态（展开 / 收起抽屉）
+      let lastIsWide = window.innerWidth > 1024
+      window.addEventListener('resize', () => {
+        const isWide = window.innerWidth > 1024
+        if (isWide !== lastIsWide) {
+          lastIsWide = isWide
+          sidebarOpen.value = isWide
+        }
+      })
 
       // 如果没有会话，创建一个默认会话
       if (sessions.value.length === 0) {
@@ -555,6 +686,14 @@ createApp({
       currentInput,
       isGenerating,
       chatContainerRef,
+      inputRef,
+      autoGrowInput,
+      handleEnterKey,
+      applyRole,
+      toast,
+      isNearBottom,
+      onChatScroll,
+      forceScrollToBottom,
       currentTokensSoFar,
       maxTokensLimit,
       renderMarkdown,

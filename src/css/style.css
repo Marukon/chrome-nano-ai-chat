@@ -57,6 +57,11 @@
   padding: 0;
 }
 
+/* Vue 挂载完成前隐藏未编译的模板，避免首屏闪现 {{ }} */
+[v-cloak] {
+  display: none;
+}
+
 body {
   font-family: var(--font-sans);
   background: var(--bg-app);
@@ -64,7 +69,8 @@ body {
   line-height: 1.6;
   overflow: hidden;
   height: 100vh;
-  width: 100vw;
+  height: 100dvh; /* 移动端浏览器地址栏动态高度 */
+  width: 100%;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -89,7 +95,8 @@ body {
 #app {
   display: flex;
   height: 100vh;
-  width: 100vw;
+  height: 100dvh;
+  width: 100%;
   position: relative;
   overflow: hidden;
 }
@@ -98,13 +105,26 @@ body {
 .sidebar {
   width: 280px;
   min-width: 280px;
-  height: 100vh;
+  flex-shrink: 0;
+  height: 100%;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   z-index: 20;
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              margin-left 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 宽屏（>1024px）：侧边栏为常驻列，未展开时用负外边距收起，主区自动铺满 */
+@media (min-width: 1025px) {
+  .sidebar {
+    position: relative;
+    transform: none;
+  }
+  .sidebar:not(.open) {
+    margin-left: -280px;
+  }
 }
 
 .sidebar-header {
@@ -253,7 +273,8 @@ body {
 /* 主工作区 */
 .main-content {
   flex: 1;
-  height: 100vh;
+  min-width: 0; /* 关键：允许内部滚动区在窄屏收缩，避免撑破布局 */
+  height: 100%;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -268,9 +289,18 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-card);
   z-index: 10;
+}
+
+.navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
 }
 
 .nav-tabs {
@@ -280,7 +310,8 @@ body {
   padding: 3px;
   border-radius: 10px;
   overflow-x: auto;
-  max-width: 65vw;
+  min-width: 0;
+  max-width: 100%;
   scrollbar-width: none;
 }
 
@@ -315,6 +346,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .icon-button {
@@ -410,6 +442,8 @@ body {
 /* 消息中的 Markdown 语法与学术排版 */
 .markdown-body {
   font-size: 0.95rem;
+  min-width: 0;
+  overflow-wrap: anywhere; /* 超长英文 / 公式串不再撑破气泡 */
 }
 
 .markdown-body p {
@@ -467,6 +501,34 @@ body {
   background: rgba(125, 125, 125, 0.06);
 }
 
+/* 回到最新消息悬浮按钮（滚动锁解除入口） */
+.scroll-latest-btn {
+  position: absolute;
+  bottom: 104px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 16;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.scroll-latest-btn:hover {
+  color: var(--text-primary);
+  transform: translateX(-50%) translateY(-1px);
+  box-shadow: var(--shadow-lg);
+}
+
 /* 底部浮动输入区 */
 .input-dock {
   position: absolute;
@@ -499,6 +561,7 @@ body {
   width: 100%;
   min-height: 44px;
   max-height: 180px;
+  overflow-y: auto;
   border: none;
   background: transparent;
   color: var(--text-primary);
@@ -571,24 +634,17 @@ body {
   gap: 20px;
 }
 
-@media (max-width: 768px) {
-  .studio-container {
-    grid-template-columns: 1fr;
-  }
-  .sidebar {
-    position: absolute;
-    transform: translateX(-100%);
-  }
-  .sidebar.open {
-    transform: translateX(0);
-  }
+/* 窄屏遮罩（仅在抽屉模式下启用，见文件末尾「响应式适配」） */
+.sidebar-backdrop {
+  display: none;
 }
 
 .studio-card {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 120px);
   min-height: 480px;
+  height: calc(100vh - 120px);
+  height: calc(100dvh - 120px);
 }
 
 .studio-card-header {
@@ -597,6 +653,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 头部右侧的下拉组：窄屏自动换行，避免撑破卡片 */
+.studio-card-header > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.studio-card-header select {
+  max-width: 100%;
 }
 
 .studio-card-body {
@@ -635,7 +705,7 @@ body {
 }
 
 .hero-title {
-  font-size: 2rem;
+  font-size: clamp(1.5rem, 4.5vw, 2rem);
   font-weight: 800;
   background: linear-gradient(135deg, #3b82f6 0%, #a855f7 100%);
   -webkit-background-clip: text;
@@ -693,6 +763,28 @@ body {
   padding: 24px;
 }
 
+/* 轻量全局提示条（复制反馈等） */
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  z-index: 200;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  font-size: 0.82rem;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  animation: toast-in 0.2s ease;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 /* 状态药丸徽章 */
 .status-pill {
   display: inline-flex;
@@ -719,6 +811,13 @@ body {
   background: rgba(34, 197, 94, 0.12);
   color: #16a34a;
   border-color: rgba(34, 197, 94, 0.3);
+}
+
+/* 就绪状态下仅显示对勾图标 */
+.status-check {
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 [data-theme="dark"] .status-pill.ready {
@@ -800,5 +899,202 @@ body {
 
 .diag-table tr:last-child td {
   border-bottom: none;
+}
+
+/* ==========================================================================
+   响应式适配：宽屏双栏 → 中屏抽屉 + 单栏 → 窄屏紧凑
+   ========================================================================== */
+
+/* 横向滚动容器（诊断表格 / 长表格） */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.nav-toggle {
+  flex-shrink: 0;
+}
+
+/* 触屏设备没有 hover，会话操作按钮常驻显示 */
+@media (hover: none) {
+  .session-actions {
+    display: flex;
+  }
+}
+
+/* ---------- ≤1280px：收紧留白 ---------- */
+@media (max-width: 1280px) {
+  .studio-container {
+    padding: 20px;
+    gap: 16px;
+  }
+  .chat-container {
+    padding: 20px 16px 132px;
+  }
+}
+
+/* ---------- ≤1024px：侧边栏抽屉化，工作台上下堆叠 ---------- */
+@media (max-width: 1024px) {
+  .sidebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: min(84vw, 300px);
+    min-width: 0;
+    height: 100%;
+    margin-left: 0;
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-lg);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 19;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  .sidebar-backdrop.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .studio-container {
+    grid-template-columns: 1fr;
+    padding: 16px;
+    gap: 16px;
+  }
+  .studio-card {
+    height: auto;
+    min-height: 320px;
+  }
+  .studio-card-body {
+    overflow-y: visible;
+  }
+  .studio-textarea {
+    min-height: 170px;
+  }
+}
+
+/* ---------- ≤900px：顶栏 Tabs 折叠为纯图标 ---------- */
+@media (max-width: 900px) {
+  .top-navbar {
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .navbar-left {
+    gap: 8px;
+  }
+  .tab-label {
+    display: none;
+  }
+  .nav-tab {
+    padding: 6px 10px;
+    font-size: 1rem;
+  }
+}
+
+/* ---------- ≤640px：紧凑模式 ---------- */
+@media (max-width: 640px) {
+  .top-navbar {
+    height: 52px;
+    padding: 0 10px;
+  }
+  .icon-button {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+  }
+  .status-pill {
+    padding: 4px 10px;
+  }
+  .nav-actions .role-badge {
+    display: none; /* 角色入口仍保留在侧边栏与输入框 */
+  }
+
+  .chat-container {
+    padding: 16px 12px 124px;
+    gap: 16px;
+  }
+  .message-row {
+    gap: 10px;
+  }
+  .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    font-size: 1rem;
+  }
+  .message-bubble {
+    max-width: 88%;
+    padding: 12px 14px;
+    font-size: 0.92rem;
+  }
+
+  .input-dock {
+    bottom: 12px;
+    width: calc(100% - 24px);
+  }
+  .input-box {
+    border-radius: 16px;
+    padding: 8px 12px;
+  }
+  .scroll-latest-btn {
+    bottom: 96px;
+  }
+
+  .hero-container {
+    padding: 24px 12px;
+    gap: 12px;
+  }
+  .quick-prompts {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-container {
+    padding: 12px;
+    gap: 12px;
+  }
+  .studio-card {
+    min-height: 280px;
+  }
+  .studio-card-header {
+    padding: 12px 14px;
+  }
+
+  .modal-content {
+    width: 94%;
+    max-height: 92vh;
+    border-radius: 16px;
+  }
+  .modal-body-scroll {
+    padding: 16px;
+  }
+
+  /* 长表格转为横向滚动，避免撑破卡片 */
+  .markdown-body table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+/* ---------- ≤380px：极窄屏 ---------- */
+@media (max-width: 380px) {
+  .brand span {
+    display: none;
+  }
+  .nav-tab {
+    padding: 6px 8px;
+  }
+  .status-pill {
+    padding: 4px 8px;
+  }
 }
 

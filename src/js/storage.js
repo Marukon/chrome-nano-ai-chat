@@ -37,7 +37,18 @@ export function loadSessions() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.SESSIONS)
     if (!raw) return []
-    return JSON.parse(raw)
+    const list = JSON.parse(raw)
+    if (!Array.isArray(list)) return []
+    // 兼容历史/损坏数据：过滤非法项并补全必需字段，避免渲染时崩溃
+    return list
+      .filter(s => s && typeof s === 'object' && s.id)
+      .map(s => ({
+        ...s,
+        messages: Array.isArray(s.messages) ? s.messages : [],
+        title: s.title || '未命名对话',
+        createdAt: s.createdAt || Date.now(),
+        updatedAt: s.updatedAt || s.createdAt || Date.now(),
+      }))
   } catch (e) {
     console.error('Failed to load sessions:', e)
     return []

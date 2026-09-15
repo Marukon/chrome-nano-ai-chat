@@ -1,0 +1,19 @@
+# ==========================================
+# 构建产物（必须通过 npm run build / python build.py 生成后才能部署）
+# ==========================================
+/index.html
+/favicon.ico
+/apple-touch-icon.png
+/assets/css/
+/assets/js/
+/assets/manifest.json
+
+# ==========================================
+# 依赖与编辑器
+# ==========================================
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/

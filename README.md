@@ -19,11 +19,37 @@
 
 ## 🚀 运行与部署指南
 
-由于本项目所有前端静态资源（JS/CSS/Fonts）均已全部本地化打包，**无需经过复杂的构建编译即可直接运行**：
+> ⚠️ **必须先编译再部署**：仓库中**不再包含**根目录 `index.html` 与 `assets/css`、`assets/js` 下的业务产物（已在 `.gitignore` 中忽略）。
+> 任何环境（本地预览 / Nginx / EdgeOne / Cloudflare Pages 等）都必须先执行构建命令生成入口文件后才能访问。
 
-### 方式一：直接使用任意静态服务器托管（推荐）
+### 第 0 步：编译生成入口文件（必做）
 
-你可以直接将整个文件夹扔到自己的 Nginx、Caddy、Apache、EdgeOne、Cloudflare Pages 或宝塔面板上：
+```bash
+# npm（唯一推荐，零第三方依赖）
+npm run build
+
+# 等价直接调用
+node scripts/build.js
+
+# 仅清理产物，不构建
+npm run clean
+```
+
+构建完成后会自动生成根目录 `index.html` 与带版本号的资源文件。
+
+| 产物 | 示例文件名 |
+| --- | --- |
+| 样式表 | `assets/css/style.v1.1.0.3f9a2c1b.css` |
+| 主程序 | `assets/js/app.v1.1.0.3f9a2c1b.js` |
+| 模块 | `assets/js/chrome-ai.v1.1.0.3f9a2c1b.js` 等 |
+
+命名规则为 `<name>.v<package.json 版本>.<8 位随机哈希>.<ext>`：版本号便于线上定位与回滚，随机哈希保证每次构建都是全新 URL、CDN 必然回源。版本清单写在 `assets/manifest.json`。
+
+> ⚠️ 构建仅支持 Node.js（`npm run build`）。项目已移除 Python 构建脚本——部分构建平台的 `python` 仍是 Python 2，无法运行。
+
+### 方式一：使用任意静态服务器托管（推荐）
+
+构建完成后，将整个文件夹放到 Nginx、Caddy、Apache、EdgeOne、Cloudflare Pages 或宝塔面板上：
 
 ```nginx
 # Nginx 示例配置
@@ -35,15 +61,16 @@ server {
 }
 ```
 
-### 方式二：本地快速预览（Node / Python / Live Server）
+> EdgeOne 等平台的构建命令请填写 `npm run build`，输出目录填仓库根目录。
 
-在当前目录下执行任意命令即可启动本地服务：
+### 方式二：本地快速预览
 
 ```bash
-# Python
-python -m http.server 8080
+# 一步完成：构建并启动本地服务
+npm run dev
 
-# 或 Node / npx
+# 或先构建，再单独启动
+npm run build
 npx serve .
 ```
 
@@ -51,27 +78,24 @@ npx serve .
 
 ---
 
-## 🔨 源码开发与防 CDN 缓存构建
+## 🔨 源码开发与版本化构建
 
-EdgeOne 等现代 CDN 通常对静态资源（`.js` / `.css`）配置了较长缓存周期（例如 30 天 `max-age=2592000`）。为了确保每次发布更新后 CDN 边缘节点能够**立即分发最新代码**且不受旧缓存影响，本项目提供了全自动随机哈希构建机制：
+EdgeOne 等现代 CDN 通常对静态资源（`.js` / `.css`）配置了较长缓存周期（例如 30 天 `max-age=2592000`）。为了确保每次发布更新后 CDN 边缘节点能够**立即分发最新代码**且不受旧缓存影响，本项目提供全自动版本化构建：
 
 - **基准源码**：存放于 `src/` 目录中（`src/index.html`、`src/css/style.css`、`src/js/*.js`）；
 - **执行构建**：
   ```bash
-  # 使用 Python (推荐，跨平台且零第三方依赖)
-  python build.py
-
-  # 或使用 Node.js
-  node scripts/build.js
-  # 或
-  npm run build
+  npm run build        # 等价于 node scripts/build.js
+  npm run clean        # 仅清理产物
   ```
 - **自动处理**：
-  1. 清理上一次构建的旧哈希文件；
-  2. 生成全新的 8 位随机哈希版本号；
-  3. 将业务 CSS/JS 打包为带哈希的独立文件名（如 `style.<hash>.css`、`app.<hash>.js`）；
-  4. 自动解析并重写 `app.<hash>.js` 内部的 ES 模块依赖导入路径；
+  1. 清空上一次构建遗留的旧版本文件（避免历史哈希文件永久堆积）；
+  2. 读取 `package.json` 的版本号，并生成 8 位随机哈希，组合成版本标识（如 `v1.1.0.3f9a2c1b`）；
+  3. 将业务 CSS/JS 输出为带版本号的文件名（如 `style.v1.1.0.3f9a2c1b.css`、`app.v1.1.0.3f9a2c1b.js`）；
+  4. 自动解析并重写 `app.v1.1.0.3f9a2c1b.js` 内部的 ES 模块依赖导入路径；
   5. 自动同步更新根目录 `index.html` 外部引用路径与 `assets/manifest.json` 版本清单。
+
+> 仓库中不包含任何静态产物，根目录 `index.html`、`assets/css/`、`assets/js/`、`assets/manifest.json` 均在 `.gitignore` 中，必须构建后才会出现。
 
 ---
 

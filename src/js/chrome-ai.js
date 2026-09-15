@@ -352,6 +352,36 @@ export class ChromeAIService {
   }
 
   /**
+   * 归一化流式分片：
+   * 不同浏览器实现差异较大，有的每一片是「增量片段」，有的是「从头累积的全文」。
+   * 这里统一合并为「从头累积的全文」，避免 UI 上出现「蹦一个字、消失一个字」的覆盖问题。
+   */
+  static mergeStreamChunk(previous, chunk) {
+    const text = typeof chunk === 'string' ? chunk : String(chunk ?? '')
+    if (!text) return previous
+    if (!previous) return text
+    if (text.startsWith(previous)) return text
+    return previous + text
+  }
+
+  /**
+   * 带降级的实例创建：部分浏览器实现不支持 sharedContext 等扩展参数
+   */
+  static async createInstance(API, options) {
+    try {
+      return await API.create(options)
+    } catch (err) {
+      const { sharedContext, ...rest } = options
+      if (sharedContext === undefined) throw err
+      try {
+        return await API.create(rest)
+      } catch (_) {
+        throw err
+      }
+    }
+  }
+
+  /**
    * 执行文本摘要 (Summarizer API)
    */
   static async summarize(text, options = {}, onChunk, signal) {
@@ -364,12 +394,14 @@ export class ChromeAIService {
       type = 'key-points',
       format = 'markdown',
       length = 'medium',
+      sharedContext = '',
     } = options
 
-    const summarizer = await SummarizerAPI.create({
+    const summarizer = await this.createInstance(SummarizerAPI, {
       type,
       format,
       length,
+      sharedContext,
     })
 
     try {
@@ -378,7 +410,7 @@ export class ChromeAIService {
         let full = ''
         for await (const chunk of stream) {
           if (signal?.aborted) break
-          full = chunk
+          full = this.mergeStreamChunk(full, chunk)
           onChunk?.(full)
         }
         return full
@@ -408,7 +440,7 @@ export class ChromeAIService {
       sharedContext = '',
     } = options
 
-    const rewriter = await RewriterAPI.create({
+    const rewriter = await this.createInstance(RewriterAPI, {
       tone,
       format,
       length,
@@ -421,7 +453,7 @@ export class ChromeAIService {
         let full = ''
         for await (const chunk of stream) {
           if (signal?.aborted) break
-          full = chunk
+          full = this.mergeStreamChunk(full, chunk)
           onChunk?.(full)
         }
         return full
@@ -449,13 +481,16 @@ export class ChromeAIService {
       format = 'markdown',
       length = 'medium',
       context = '',
+      roleContext = '',
     } = options
 
-    const writer = await WriterAPI.create({
+    const sharedContext = [roleContext, context].filter(Boolean).join('\n\n')
+
+    const writer = await this.createInstance(WriterAPI, {
       tone,
       format,
       length,
-      sharedContext: context,
+      sharedContext,
     })
 
     try {
@@ -464,7 +499,7 @@ export class ChromeAIService {
         let full = ''
         for await (const chunk of stream) {
           if (signal?.aborted) break
-          full = chunk
+          full = this.mergeStreamChunk(full, chunk)
           onChunk?.(full)
         }
         return full
