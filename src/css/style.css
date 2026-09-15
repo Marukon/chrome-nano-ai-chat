@@ -484,6 +484,19 @@ body {
   gap: 2px;
 }
 
+/* 悬停安全区：填掉按钮与菜单之间的空隙，
+   鼠标斜向移入菜单时不会因为离开按钮而触发关闭。
+   透明但可接收鼠标事件（用 background 而非 visibility）。 */
+.nav-dropdown::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: transparent;
+}
+
 .nav-dropdown-item {
   display: flex;
   align-items: center;

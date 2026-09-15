@@ -288,8 +288,31 @@ createApp({
       openMenu.value = ''
     }
 
-    // 展开/收起顶栏二级菜单
+    // 顶栏二级菜单：悬停展开 + 延迟关闭
+    // 延迟是为了让鼠标从按钮移到菜单项时菜单不被立刻关掉
+    let menuCloseTimer = null
+
+    function cancelCloseMenu() {
+      clearTimeout(menuCloseTimer)
+      menuCloseTimer = null
+    }
+
+    function openMenuOnHover(groupId) {
+      cancelCloseMenu()
+      openMenu.value = groupId
+    }
+
+    function scheduleCloseMenu() {
+      cancelCloseMenu()
+      menuCloseTimer = setTimeout(() => {
+        openMenu.value = ''
+        menuCloseTimer = null
+      }, 160)
+    }
+
+    // 点击仍保留：触摸屏 / 键盘用户没有 hover，需要它来开合
     function toggleMenu(groupId) {
+      cancelCloseMenu()
       openMenu.value = openMenu.value === groupId ? '' : groupId
     }
 

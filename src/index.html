@@ -91,10 +91,13 @@
               <span class="tab-emoji">💬</span><span class="tab-label">自由对话</span>
             </button>
 
+            <!-- 鼠标悬停即展开（带延迟关闭，便于移入菜单项），触摸设备退化为点击 -->
             <div
               v-for="group in MODE_GROUPS"
               :key="group.id"
               class="nav-group"
+              @mouseenter="openMenuOnHover(group.id)"
+              @mouseleave="scheduleCloseMenu()"
             >
               <button
                 class="nav-tab"
@@ -106,7 +109,7 @@
                 <span class="tab-caret">▾</span>
               </button>
 
-              <div v-if="openMenu === group.id" class="nav-dropdown">
+              <div v-if="openMenu === group.id" class="nav-dropdown" @mouseenter="cancelCloseMenu()" @mouseleave="scheduleCloseMenu()">
                 <button
                   v-for="m in group.modes"
                   :key="m"
