@@ -131,22 +131,25 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           </button>
 
-          <!-- 端侧模型检测按钮
-               能用时完全不提示（连按钮都不占位）；不能用时自动弹出检测窗口。
-               检测中显示环形旋转动画。 -->
-          <div v-if="diagNeeded" class="diag-anchor">
+          <!-- 端侧模型检测按钮：常驻显示，随时可点开查看报告
+               注意：无论成功与否都不自动弹窗，仅在用户点击时打开 -->
+          <div class="diag-anchor">
             <button
               class="status-pill"
               :class="{
                 'checking': aiStatus.prompt === 'checking',
-                'unavail': aiStatus.prompt !== 'checking'
+                'ready': aiStatus.prompt === 'available',
+                'warn': aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && (aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'),
+                'unavail': aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && !(aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available')
               }"
-              :title="aiStatus.prompt === 'checking' ? '正在检测端侧模型…' : '端侧模型不可用，点击查看检测与开启指引'"
+              :title="aiStatus.prompt === 'checking' ? '正在检测端侧模型…' : '点击查看端侧模型检测报告'"
               @click="diagModalOpen = true"
             >
               <span v-if="aiStatus.prompt === 'checking'" class="status-spinner"></span>
               <span v-else class="status-dot"></span>
               <span v-if="aiStatus.prompt === 'checking'" class="status-skeleton"></span>
+              <span v-else-if="aiStatus.prompt === 'available'" class="status-check">✓</span>
+              <span v-else-if="aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'">仅翻译</span>
               <span v-else>待配置</span>
             </button>
           </div>

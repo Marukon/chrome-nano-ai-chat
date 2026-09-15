@@ -46,16 +46,8 @@ createApp({
     // 窄屏（≤1024px）侧边栏为抽屉模式，默认收起；宽屏默认展开
     const sidebarOpen = ref(window.innerWidth > 1024)
     const settingsModalOpen = ref(false)
-    // 端侧模型检测弹窗（仅在模型不可用时自动弹出一次）
+    // 端侧模型检测弹窗：只在用户点击状态按钮时打开，不做任何自动弹出
     const diagModalOpen = ref(false)
-    // 自动弹窗只触发一次，避免用户关掉后又被反复弹出来
-    let diagAutoShown = false
-
-    // 仅在"确实不可用"时才在顶栏显示检测入口；能用时界面保持干净无提示
-    const diagNeeded = computed(() => {
-      const p = aiStatus.value?.prompt
-      return p === 'checking' || p === 'unavailable'
-    })
 
     // 检测条目：把状态映射成弹窗里的列表（含检测中过渡态）
     const diagItems = computed(() => {
@@ -268,18 +260,8 @@ createApp({
         })
         .finally(() => {
           statusPromise = null
-          autoOpenDiagIfUnavailable()
         })
       return statusPromise
-    }
-
-    // 端侧对话模型确实不可用时，自动弹出检测窗口一次（可用则完全不打扰）
-    function autoOpenDiagIfUnavailable() {
-      if (diagAutoShown) return
-      if (aiStatus.value?.prompt === 'unavailable') {
-        diagAutoShown = true
-        diagModalOpen.value = true
-      }
     }
 
     // 切换模式
@@ -1552,7 +1534,6 @@ createApp({
       sidebarOpen,
       settingsModalOpen,
       diagModalOpen,
-      diagNeeded,
       diagItems,
       roleModalOpen,
       ROLE_PRESETS,
