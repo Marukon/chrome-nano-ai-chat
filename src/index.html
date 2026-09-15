@@ -16,7 +16,9 @@
   <link rel="stylesheet" href="./assets/css/style.css">
 </head>
 <body>
-  <div id="app">
+  <!-- v-cloak：Vue 挂载完成前隐藏整个应用，避免 v-if 失效导致
+       所有模式面板与 {{ }} 原文裸露（表现为打开页面先闪一大片乱码） -->
+  <div id="app" v-cloak>
     <!-- 窄屏侧边栏遮罩（点击收起抽屉） -->
     <div class="sidebar-backdrop" :class="{ show: sidebarOpen }" @click="sidebarOpen = false"></div>
 

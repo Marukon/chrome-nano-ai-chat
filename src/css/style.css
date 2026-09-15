@@ -57,8 +57,12 @@
   padding: 0;
 }
 
-/* Vue 挂载完成前隐藏未编译的模板，避免首屏闪现 {{ }} */
-[v-cloak] {
+/* Vue 挂载完成前隐藏未编译的模板，避免 v-if 失效时
+   所有模式面板与 {{ }} 原文裸露（打开页面先闪一大片乱码）。
+   双保险：html.mounted 由 onMounted 添加，即使 v-cloak 属性未被移除，
+   也会在挂载后立刻恢复显示，不会出现白屏。 */
+[v-cloak],
+html:not(.mounted) #app {
   display: none;
 }
 
