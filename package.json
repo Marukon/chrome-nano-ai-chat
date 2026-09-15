@@ -1,0 +1,20 @@
+{
+  "name": "chrome-nano-ai-chat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A modern on-device AI workspace powered by Chrome Built-in Gemini Nano",
+  "scripts": {
+    "dev": "npx serve .",
+    "start": "npx serve ."
+  },
+  "keywords": [
+    "chrome-ai",
+    "gemini-nano",
+    "on-device-ai",
+    "prompt-api",
+    "summarizer-api",
+    "rewriter-api"
+  ],
+  "author": "Maruko",
+  "license": "MIT"
+}
