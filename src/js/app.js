@@ -217,6 +217,7 @@ createApp({
     }
 
     // 初始化检查 AI 支持（单例：避免多处并发触发重复检测与状态抖动）
+    // 任何异常都必须吞掉，否则会抛出到 onMounted 之外导致整个应用挂掉
     let statusPromise = null
     function checkSystemAI() {
       if (statusPromise) return statusPromise
@@ -224,6 +225,14 @@ createApp({
         .then(status => {
           aiStatus.value = status
           return status
+        })
+        .catch(err => {
+          console.error('[NanoAI] 端侧模型状态检测失败:', err)
+          aiStatus.value = Object.assign({}, aiStatus.value, {
+            prompt: 'unavailable',
+            errorReason: err?.message || String(err),
+          })
+          return aiStatus.value
         })
         .finally(() => {
           statusPromise = null
@@ -1406,38 +1415,54 @@ createApp({
       saveSettings(val)
     }, { deep: true })
 
-    // 初始化
+    // 初始化：每一步都用 try/catch 包住，任何单点失败都不应导致整页白屏
     onMounted(() => {
-      // 设置主题
-      const initialTheme = settings.value.theme === 'auto'
-        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-        : settings.value.theme
-      document.documentElement.setAttribute('data-theme', initialTheme)
+      console.log('[NanoAI] 应用已挂载，开始初始化')
 
+      try {
+        const initialTheme = settings.value.theme === 'auto'
+          ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : settings.value.theme
+        document.documentElement.setAttribute('data-theme', initialTheme)
+      } catch (e) {
+        console.error('[NanoAI] 主题初始化失败:', e)
+      }
+
+      // 端侧模型检测为异步且已内部兜底，不阻塞渲染
       checkSystemAI()
 
-      // 点击顶栏菜单外部时收起二级菜单
-      document.addEventListener('click', (e) => {
-        if (typeof e.target?.closest === 'function' && e.target.closest('.nav-group')) return
-        openMenu.value = ''
-      })
+      try {
+        // 点击顶栏菜单外部时收起二级菜单
+        document.addEventListener('click', (e) => {
+          if (typeof e.target?.closest === 'function' && e.target.closest('.nav-group')) return
+          openMenu.value = ''
+        })
 
-      // 视口跨越 1024px 断点时，自动切换侧边栏形态（展开 / 收起抽屉）
-      let lastIsWide = window.innerWidth > 1024
-      window.addEventListener('resize', () => {
-        const isWide = window.innerWidth > 1024
-        if (isWide !== lastIsWide) {
-          lastIsWide = isWide
-          sidebarOpen.value = isWide
-        }
-      })
-
-      // 如果没有会话，创建一个默认会话
-      if (sessions.value.length === 0) {
-        createNewSession()
-      } else if (!activeSession.value) {
-        selectSession(sessions.value[0].id)
+        // 视口跨越 1024px 断点时，自动切换侧边栏形态（展开 / 收起抽屉）
+        let lastIsWide = window.innerWidth > 1024
+        window.addEventListener('resize', () => {
+          const isWide = window.innerWidth > 1024
+          if (isWide !== lastIsWide) {
+            lastIsWide = isWide
+            sidebarOpen.value = isWide
+          }
+        })
+      } catch (e) {
+        console.error('[NanoAI] 事件监听注册失败:', e)
       }
+
+      // 会话初始化：即使失败也要保证界面可见
+      try {
+        if (sessions.value.length === 0) {
+          createNewSession()
+        } else if (!activeSession.value) {
+          selectSession(sessions.value[0].id)
+        }
+      } catch (e) {
+        console.error('[NanoAI] 会话初始化失败:', e)
+      }
+
+      console.log('[NanoAI] 初始化完成')
     })
 
     return {
@@ -1570,7 +1595,6 @@ createApp({
       runRebuttal,
       // Proofread
       proofreadInput,
-      proofreadStandard,
       proofreadOutput,
       isProofreading,
       runProofread,
@@ -1598,3 +1622,11 @@ createApp({
     }
   }
 }).mount('#app')
+
+// 兜底：任何未捕获异常/未处理 Promise 都只记录日志，不再阻断界面
+window.addEventListener('error', (e) => {
+  console.error('[NanoAI] 未捕获异常:', e.message, e.filename, e.lineno)
+})
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[NanoAI] 未处理的 Promise 拒绝:', e.reason)
+})

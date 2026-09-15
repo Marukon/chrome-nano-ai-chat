@@ -191,5 +191,15 @@ if (args.includes('--clean')) {
   cleanBuild();
   console.log('✨ 仅清理完成（未构建）。');
 } else {
+  // 先做静态校验：setup 导出项 / 模板表达式等错误会导致运行时整页白屏
+  const check = require('child_process').spawnSync(
+    process.execPath,
+    [path.join(__dirname, 'check-setup.js')],
+    { stdio: 'inherit' }
+  );
+  if (check.status !== 0) {
+    console.error('\n⛔ 静态校验未通过，已终止构建（避免发布白屏版本）。');
+    process.exit(check.status || 1);
+  }
   build();
 }
