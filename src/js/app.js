@@ -20,7 +20,8 @@ import {
   saveActiveSessionId,
   loadSettings,
   saveSettings,
-  exportSessionToMarkdown
+  exportSessionToMarkdown,
+  exportScriptAsTxt
 } from './storage.js'
 
 // marked 全局配置（只需设置一次，避免每次渲染重复执行）
@@ -396,6 +397,14 @@ createApp({
       saveSettings(settings.value)
     }
 
+    // 把生成的脚本导出为 .txt
+    function exportScriptAsTxtFile() {
+      if (!scriptOutput.value) return
+      const extLabel = { bash: 'sh', bat: 'bat', powershell: 'ps1' }[scriptType.value] || 'txt'
+      exportScriptAsTxt(scriptOutput.value, scriptType.value, `script_${scriptType.value}`)
+      showToast(`✅ 已导出为 .${extLabel} 文本文件`)
+    }
+
     // 轻量提示条
     function showToast(message) {
       toast.value = message
@@ -464,6 +473,39 @@ createApp({
     // 角色弹窗：按分组取角色
     function rolesInGroup(groupId) {
       return ROLE_PRESETS.filter(r => (r.group || 'general') === groupId)
+    }
+
+    // 起草场景一键套用（日常祝福、通知、社交文案为主）
+    const WRITER_SCENES = [
+      { label: '🎂 生日祝福', prompt: '写一段生日祝福', context: '送给：\n关系（同事/朋友/家人/领导/长辈）：\n对方特点或喜好：\n语气：\n字数要求：' },
+      { label: '🎓 教师节祝福', prompt: '写一段教师节祝福', context: '送给：\n称呼：\n想感谢的具体事情：\n语气：\n字数要求：' },
+      { label: '🎉 节日祝福', prompt: '写一段节日祝福', context: '节日名称：\n送给：\n发送渠道（微信群/私聊/朋友圈）：\n语气：' },
+      { label: '📢 群通知', prompt: '写一则发在微信群的通知', context: '事由：\n时间：\n地点：\n需要大家做什么：\n是否要大家回复确认：' },
+      { label: '💬 社交回复', prompt: '帮我回复一段话', context: '对方说了什么：\n我与对方的关系：\n我希望达成的效果（感谢/婉拒/道歉/邀约）：\n语气：' },
+      { label: '🙏 感谢致意', prompt: '写一段感谢的话', context: '感谢对象：\n感谢原因：\n语气：\n字数要求：' },
+      { label: '🌷 慰问关怀', prompt: '写一段慰问/关怀的话', context: '对象与情况：\n语气（温暖/克制）：\n字数要求：' },
+      { label: '📨 请假/申请', prompt: '写一则请假申请', context: '请假事由：\n起止时间：\n工作交接安排：\n发送对象（直属领导/HR）：' },
+    ]
+
+    // 起草功能的系统提示词
+    const WRITER_SYSTEM_PROMPT =
+      '你是一位中文日常文案写作助手，擅长写生日祝福、节日祝福、教师节祝福、感谢致意、' +
+      '慰问关怀、微信群通知、社交消息回复、请假申请等生活与职场场合的短文案。' +
+      '要求：1. 直接输出可发送的成品，不要解释写作思路，不要加"以下是"之类的前后缀；' +
+      '2. 语言自然真诚，贴合中文表达习惯，避免翻译腔和空洞排比；' +
+      '3. 若用户给了称呼、关系、场合、字数，必须严格遵守；未给的细节不要臆造人名与事实；' +
+      '4. 需要多个版本时，用"版本一 / 版本二"分行列出，每条独立可用；' +
+      '5. 默认控制在 150 字以内，用户指定字数时以用户要求为准。'
+
+    // 套用起草场景
+    function applyWriterScene(scene) {
+      writePrompt.value = scene.prompt
+      writeContext.value = scene.context
+      nextTick(() => {
+        autoGrowInput()
+        inputRef.value?.focus()
+      })
+      showToast(`已套用「${scene.label.replace(/^\S+\s/, '')}」模板，补充细节后开始起草`)
     }
 
     // 欢迎页「从角色开始」的精选角色（覆盖论文、语言、工程、学习等不同维度）
@@ -619,7 +661,7 @@ createApp({
       }
     }
 
-    // 运行 Writer 模式
+    // 运行 Writer 模式（日常文案：祝福 / 通知 / 社交回复）
     async function runWriter() {
       if (!writePrompt.value.trim() || isWriting.value) return
       isWriting.value = true
@@ -630,9 +672,11 @@ createApp({
         await ChromeAIService.write(
           writePrompt.value,
           {
-            tone: writeTone.value,
+            tone: writeTone.value === 'formal' ? 'formal' : 'casual',
             length: writeLength.value,
             context: writeContext.value,
+            // 场景化系统提示词：覆盖祝福、通知、日常社交文案
+            scene: WRITER_SYSTEM_PROMPT,
           },
           (chunk) => {
             writeOutput.value = chunk
@@ -1093,6 +1137,7 @@ createApp({
       quickRoles,
       startWithRole,
       exportSessionToMarkdown,
+      exportScriptAsTxt: exportScriptAsTxtFile,
       // Diagnostics
       translateTestState,
       runTranslateTest,
@@ -1119,6 +1164,8 @@ createApp({
       isRewriting,
       runRewriter,
       // Writer
+      WRITER_SCENES,
+      applyWriterScene,
       writePrompt,
       writeContext,
       writeOutput,

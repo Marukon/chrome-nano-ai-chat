@@ -520,10 +520,10 @@ export class ChromeAIService {
       format = 'markdown',
       length = 'medium',
       context = '',
-      roleContext = '',
+      scene = '',
     } = options
 
-    const sharedContext = [roleContext, context].filter(Boolean).join('\n\n')
+    const sharedContext = [scene, context].filter(Boolean).join('\n\n')
 
     const writer = await this.createInstance(WriterAPI, {
       tone,

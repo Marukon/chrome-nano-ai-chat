@@ -402,29 +402,39 @@
         </div>
       </section>
 
-      <!-- 模式 4：辅助起草 (Writer API) -->
+      <!-- 模式 4：文案起草 (Writer API) -->
       <section v-if="currentMode === 'writer'" class="studio-container">
         <div class="glass-card studio-card">
           <div class="studio-card-header">
-            <span style="font-weight:600;font-size:0.95rem;">✍️ 写作需求与背景大纲</span>
+            <span style="font-weight:600;font-size:0.95rem;">✍️ 要写什么？</span>
             <div style="display:flex;gap:8px;">
               <select v-model="writeTone" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
-                <option value="formal">学术/正式语气</option>
-                <option value="casual">轻松语气</option>
+                <option value="formal">正式得体</option>
+                <option value="casual">亲切自然</option>
               </select>
             </div>
           </div>
           <div class="studio-card-body" style="gap:12px;">
+            <!-- 常用场景一键套用 -->
+            <div class="writer-scenes">
+              <button
+                v-for="scene in WRITER_SCENES"
+                :key="scene.label"
+                class="writer-scene-chip"
+                @click="applyWriterScene(scene)"
+              >{{ scene.label }}</button>
+            </div>
+
             <input
               v-model="writePrompt"
               class="glass"
               style="padding:10px 14px;border-radius:10px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);font-size:0.9rem;"
-              placeholder="写作主题 (例如：给审稿人针对第 2 个实验问题的答辩信草稿)"
+              placeholder="写作主题 (例如：给同事小王的生日祝福 / 关于周六团建的通知)"
             />
             <textarea
               v-model="writeContext"
               class="studio-textarea"
-              placeholder="补充上下文或要点列表 (例如：我们补充了 3 组对照实验，并在正文第 4 节更新了图表 5...)"
+              placeholder="补充要素（可选）：对象、场合、时间地点、需要提到的人名或事情...&#10;例如：小王，30岁，平时爱打羽毛球；语气轻松一点，150 字以内"
             ></textarea>
             <div style="display:flex;justify-content:flex-end;">
               <button v-if="isWriting" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
@@ -440,7 +450,7 @@
 
         <div class="glass-card studio-card">
           <div class="studio-card-header">
-            <span style="font-weight:600;font-size:0.95rem;">📄 起草成品</span>
+            <span style="font-weight:600;font-size:0.95rem;">📄 文案成品</span>
             <button v-if="writeOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(writeOutput)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
@@ -448,7 +458,7 @@
           <div class="studio-card-body">
             <div v-if="writeOutput" class="markdown-body" v-html="renderMarkdown(writeOutput)"></div>
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
-              起草生成的文本段落将实时在此呈现
+              写好的祝福、通知或文案将在此呈现，可直接复制发送
             </div>
           </div>
         </div>
@@ -658,7 +668,6 @@
           </div>
         </div>
       </section>
-    </main>
 
       <!-- 模式 9：脚本编写 (Script Writer) -->
       <section v-if="currentMode === 'script'" class="studio-container">
@@ -694,9 +703,14 @@
         <div class="glass-card studio-card">
           <div class="studio-card-header">
             <span style="font-weight:600;font-size:0.95rem;">📜 脚本与用法说明</span>
-            <button v-if="scriptOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(scriptOutput)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            </button>
+            <div style="display:flex;gap:8px;">
+              <button v-if="scriptOutput" class="icon-button" style="width:28px;height:28px;" title="导出为 .txt 文件" @click="exportScriptAsTxt()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              </button>
+              <button v-if="scriptOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(scriptOutput)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              </button>
+            </div>
           </div>
           <div class="studio-card-body">
             <div v-if="scriptOutput" class="markdown-body" v-html="renderMarkdown(scriptOutput)"></div>
@@ -706,6 +720,7 @@
           </div>
         </div>
       </section>
+    </main>
 
     <!-- 角色预设切换弹窗 -->
     <div v-if="roleModalOpen" class="modal-backdrop" @click.self="roleModalOpen = false">

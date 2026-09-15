@@ -85,6 +85,35 @@ function downloadMarkdown(md, title) {
   URL.revokeObjectURL(url)
 }
 
+/**
+ * 把生成的脚本导出为 .txt 文件
+ * 自动剥掉 Markdown 代码围栏与行号，得到可直接运行的纯脚本
+ */
+export function exportScriptAsTxt(content, language = 'bash', title = 'script') {
+  if (!content) return
+
+  const ext = { bat: 'bat', powershell: 'ps1', bash: 'sh' }[language] || 'txt'
+  const fence = '```'
+  let body = String(content)
+
+  // 若包含代码围栏，优先抽取围栏内的脚本本体
+  const fenceRe = new RegExp(fence + '[a-zA-Z0-9+#-]*\\n([\\s\\S]*?)' + fence)
+  const matched = body.match(fenceRe)
+  if (matched) body = matched[1]
+
+  // 去掉首尾空行，并统一换行为 LF（避免 Windows 下 BAT 因 CRLF 混用出错）
+  body = body.replace(/\r\n/g, '\n').replace(/^\s*\n/, '').trimEnd()
+
+  const text = body + (ext === 'bat' ? '\r\n' : '\n')
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${String(title).replace(/[/\\?%*:|"<>]/g, '_')}_${Date.now()}.${ext}`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 /** 导出工具（Studio）记录为 Markdown */
 function exportStudioToMarkdown(session) {
   const meta = MODE_META[session.mode] || { label: session.mode, icon: '📄' }
