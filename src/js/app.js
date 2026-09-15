@@ -92,6 +92,21 @@ createApp({
     const polishOutput = ref('')
     const isPolishing = ref(false)
 
+    // 内容降重 (Rewrite)
+    const rewriteSrcInput = ref('')
+    const rewriteSrcStrength = ref('medium') // light | medium | strong
+    const rewriteSrcOutput = ref('')
+    const isRewriteSrcRunning = ref(false)
+
+    // 单词查询 (Dictionary)
+    const dictWord = ref('')
+    const dictOutput = ref('')
+    const isDictRunning = ref(false)
+    const dictHistory = ref([])
+
+    // 代码块自动换行（脚本 / 代码审查共用）
+    const wrapCode = ref(true)
+
     // 大纲生成 (Outline)
     const outlineTopic = ref('')
     const outlineType = ref('article') // article | report | speech | social
@@ -138,6 +153,8 @@ createApp({
       isExtracting.value = false
       isOutlining.value = false
       isPolishing.value = false
+      isRewriteSrcRunning.value = false
+      isDictRunning.value = false
       isRewriting.value = false
       isWriting.value = false
       isRebutting.value = false
@@ -571,6 +588,8 @@ createApp({
         isExtracting.value = false
         isOutlining.value = false
         isPolishing.value = false
+        isRewriteSrcRunning.value = false
+        isDictRunning.value = false
         isRewriting.value = false
         isWriting.value = false
         isRebutting.value = false
@@ -743,6 +762,107 @@ createApp({
         isOutlining.value = false
         if (studioAbort.value === runCtrl) studioAbort.value = null
       }
+    }
+
+    // 运行 内容降重 (Rewrite)：改写表达、降低文字重合度
+    async function runRewrite() {
+      if (!rewriteSrcInput.value.trim() || isRewriteSrcRunning.value) return
+      isRewriteSrcRunning.value = true
+      rewriteSrcOutput.value = ''
+      const record = ensureStudioSession('rewrite')
+      const runCtrl = beginStudioRun()
+      const strengthText = {
+        light: '轻度改写：替换同义词、调整语序，重合度降低幅度有限',
+        medium: '中度改写：重构句式与段落组织，明显降低文字重合度',
+        strong: '深度改写：重新组织论述结构与表达方式，最大幅度降低重合度',
+      }[rewriteSrcStrength.value]
+      const prompt = `请对以下文字进行降重改写（${strengthText}）。\n\n` +
+        `硬性要求：\n` +
+        `1. 严格保留原文的事实、数据、观点与结论，不得增删或歪曲；\n` +
+        `2. 专有名词、术语、公式、引用标注保持原样；\n` +
+        `3. 变换句式结构（主动/被动互换、长短句重组）、替换同义表达、调整逻辑连接词；\n` +
+        `4. 段落数量与先后顺序尽量与原文对应，便于逐段替换；\n` +
+        `5. 只输出改写后的正文，不要解释改写手法。\n\n` +
+        `【原文】：\n${rewriteSrcInput.value}`
+
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: '你是一位专业的中英文字改写专家，擅长在完全保留原意与事实的前提下重构表达方式、降低文字重合度。只输出改写后的成品。'
+        })
+        await ChromeAIService.streamPrompt(
+          session,
+          prompt,
+          ({ full }) => {
+            rewriteSrcOutput.value = full
+          },
+          runCtrl.signal
+        )
+      } catch (e) {
+        rewriteSrcOutput.value = `> ⚠️ **降重失败**：${e.message}`
+      } finally {
+        persistStudioSession(record, {
+          input: rewriteSrcInput.value,
+          options: { strength: rewriteSrcStrength.value },
+          output: rewriteSrcOutput.value,
+        })
+        isRewriteSrcRunning.value = false
+        if (studioAbort.value === runCtrl) studioAbort.value = null
+      }
+    }
+
+    // 运行 单词查询 (Dictionary)：英汉双向词典式释义
+    async function runDictionary() {
+      const word = dictWord.value.trim()
+      if (!word || isDictRunning.value) return
+      isDictRunning.value = true
+      dictOutput.value = ''
+      const record = ensureStudioSession('dict')
+      const runCtrl = beginStudioRun()
+      const prompt = `请查询并解释：${word}\n\n` +
+        `请按以下格式输出（中文解释，原文没有的信息不要编造，不确定时明确说明）：\n` +
+        `## 释义\n` +
+        `- 词性 + 中文释义（多个义项分行列出，常用的排前面）\n\n` +
+        `## 发音\n` +
+        `- 英式 / 美式 音标（若为英文单词）\n\n` +
+        `## 例句\n` +
+        `- 2-3 个例句，每句给出原文 + 中文翻译，体现不同用法\n\n` +
+        `## 搭配与辨析\n` +
+        `- 常见固定搭配、近义词辨析、易错用法\n\n` +
+        `## 记忆提示\n` +
+        `- 词根词缀或联想记忆（可选）\n\n` +
+        `如果是中文词，请给出对应的英文表达与用法说明；如果是术语或缩写，请给出全称与领域背景。`
+
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: '你是一位严谨的词典编纂者，熟悉英汉双解词典与语言学知识。释义要准确、克制，不确定的信息必须说明不确定，不得编造音标与用法。'
+        })
+        await ChromeAIService.streamPrompt(
+          session,
+          prompt,
+          ({ full }) => {
+            dictOutput.value = full
+          },
+          runCtrl.signal
+        )
+      } catch (e) {
+        dictOutput.value = `> ⚠️ **查询失败**：${e.message}`
+      } finally {
+        persistStudioSession(record, {
+          input: word,
+          output: dictOutput.value,
+        })
+        if (!dictHistory.value.includes(word)) {
+          dictHistory.value = [word, ...dictHistory.value].slice(0, 12)
+        }
+        isDictRunning.value = false
+        if (studioAbort.value === runCtrl) studioAbort.value = null
+      }
+    }
+
+    // 点击历史词条直接再查一次
+    function lookupWord(word) {
+      dictWord.value = word
+      runDictionary()
     }
 
     // 交换翻译的源语言与目标语言
@@ -1153,6 +1273,15 @@ createApp({
           if (opt.strength) polishStrength.value = opt.strength
           polishOutput.value = s.output || ''
           break
+        case 'rewrite':
+          rewriteSrcInput.value = s.input || ''
+          if (opt.strength) rewriteSrcStrength.value = opt.strength
+          rewriteSrcOutput.value = s.output || ''
+          break
+        case 'dict':
+          dictWord.value = s.input || ''
+          dictOutput.value = s.output || ''
+          break
         case 'outline':
           outlineTopic.value = s.input || ''
           if (opt.type) outlineType.value = opt.type
@@ -1300,6 +1429,21 @@ createApp({
       polishOutput,
       isPolishing,
       runPolish,
+      // Rewrite（内容降重）
+      rewriteSrcInput,
+      rewriteSrcStrength,
+      rewriteSrcOutput,
+      isRewriteSrcRunning,
+      runRewrite,
+      // Dictionary（单词查询）
+      dictWord,
+      dictOutput,
+      isDictRunning,
+      dictHistory,
+      runDictionary,
+      lookupWord,
+      // 代码换行
+      wrapCode,
       // Outline
       outlineTopic,
       outlineType,

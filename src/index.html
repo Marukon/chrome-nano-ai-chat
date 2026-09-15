@@ -408,6 +408,105 @@
         </div>
       </section>
 
+      <!-- 模式：内容降重 (Rewrite) -->
+      <section v-if="currentMode === 'rewrite'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🔄 输入需要降重的文字</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <select v-model="rewriteSrcStrength" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="light">轻度（同义替换）</option>
+                <option value="medium">中度（重构句式）</option>
+                <option value="strong">深度（重组论述）</option>
+              </select>
+            </div>
+          </div>
+          <div class="studio-card-body">
+            <textarea
+              v-model="rewriteSrcInput"
+              class="studio-textarea"
+              placeholder="粘贴需要降低文字重合度的段落（论文、报告、文案均可）。改写会严格保留事实、数据与观点，只重构表达方式..."
+            ></textarea>
+            <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+              <button v-if="isRewriteSrcRunning" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!rewriteSrcInput.trim()" @click="runRewrite()">
+                <span>🚀 开始降重改写</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">♻️ 降重后的文字</span>
+            <button v-if="rewriteSrcOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(rewriteSrcOutput)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="rewriteSrcOutput" class="markdown-body" v-html="renderMarkdown(rewriteSrcOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              改写后的段落将在此呈现，可逐段替换原文
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 模式：单词查询 (Dictionary) -->
+      <section v-if="currentMode === 'dict'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">📖 查词</span>
+            <span style="font-size:0.74rem;color:var(--text-muted);">英汉双向 · 支持术语与缩写</span>
+          </div>
+          <div class="studio-card-body" style="gap:12px;">
+            <div style="display:flex;gap:8px;">
+              <input
+                v-model="dictWord"
+                class="glass"
+                style="flex:1;padding:10px 14px;border-radius:10px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);font-size:0.95rem;min-width:0;"
+                placeholder="输入英文单词 / 短语 / 缩写，或中文词（例如：ubiquitous、注意力机制、RFC）"
+                @keydown.enter="runDictionary()"
+              />
+              <button v-if="isDictRunning" class="btn-new-chat danger" style="margin:0;flex-shrink:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;flex-shrink:0;" :disabled="!dictWord.trim()" @click="runDictionary()">
+                <span>查询</span>
+              </button>
+            </div>
+
+            <div v-if="dictHistory.length" class="writer-scenes">
+              <span style="font-size:0.74rem;color:var(--text-muted);align-self:center;">最近：</span>
+              <button
+                v-for="w in dictHistory"
+                :key="w"
+                class="writer-scene-chip"
+                @click="lookupWord(w)"
+              >{{ w }}</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">📚 释义结果</span>
+            <button v-if="dictOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(dictOutput)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="dictOutput" class="markdown-body" v-html="renderMarkdown(dictOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              释义、音标、例句、搭配与记忆提示将在此呈现
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- 模式 2.5：结构化萃取 (Extract) -->
       <section v-if="currentMode === 'extract'" class="studio-container">
         <div class="glass-card studio-card">
@@ -758,12 +857,19 @@
         <div class="glass-card studio-card">
           <div class="studio-card-header">
             <span style="font-weight:600;font-size:0.95rem;">🛡️ 代码审查报告与重构版本</span>
-            <button v-if="codeOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(codeOutput)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            </button>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <label class="switch-label" title="代码过长时自动换行显示">
+                <input v-model="wrapCode" type="checkbox" class="switch-input">
+                <span class="switch-track"></span>
+                <span>自动换行</span>
+              </label>
+              <button v-if="codeOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(codeOutput)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              </button>
+            </div>
           </div>
           <div class="studio-card-body">
-            <div v-if="codeOutput" class="markdown-body" v-html="renderMarkdown(codeOutput)"></div>
+            <div v-if="codeOutput" class="markdown-body" :class="{ 'wrap-code': wrapCode }" v-html="renderMarkdown(codeOutput)"></div>
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
               审查报告（Bug、复杂度分析、优化重构）将在此流式呈现
             </div>
@@ -810,8 +916,13 @@
         <div class="glass-card studio-card">
           <div class="studio-card-header">
             <span style="font-weight:600;font-size:0.95rem;">📜 脚本与用法说明</span>
-            <div style="display:flex;gap:8px;">
-              <button v-if="scriptOutput" class="icon-button" style="width:28px;height:28px;" title="导出为 .txt 文件" @click="exportScriptAsTxt()">
+            <div style="display:flex;gap:8px;align-items:center;">
+              <label class="switch-label" title="代码过长时自动换行显示">
+                <input v-model="wrapCode" type="checkbox" class="switch-input">
+                <span class="switch-track"></span>
+                <span>自动换行</span>
+              </label>
+              <button v-if="scriptOutput" class="icon-button" style="width:28px;height:28px;" title="导出为脚本文件（自动匹配平台编码）" @click="exportScriptAsTxt()">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
               </button>
               <button v-if="scriptOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(scriptOutput)">
@@ -820,7 +931,7 @@
             </div>
           </div>
           <div class="studio-card-body">
-            <div v-if="scriptOutput" class="markdown-body" v-html="renderMarkdown(scriptOutput)"></div>
+            <div v-if="scriptOutput" class="markdown-body" :class="{ 'wrap-code': wrapCode }" v-html="renderMarkdown(scriptOutput)"></div>
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
               生成的可运行脚本、用法示例与注意事项将在此呈现
             </div>

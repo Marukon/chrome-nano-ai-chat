@@ -11,7 +11,9 @@ export const MODE_META = {
   writer: { icon: '✍️', label: '文案起草' },
   proofread: { icon: '🔍', label: '文字纠错' },
   translate: { icon: '🌐', label: '中英互译' },
+  dict: { icon: '📖', label: '单词查询' },
   polish: { icon: '🪄', label: '通用润色' },
+  rewrite: { icon: '🔄', label: '内容降重' },
   codereview: { icon: '💻', label: '代码审查' },
   script: { icon: '🧩', label: '脚本编写' },
 }
@@ -30,7 +32,7 @@ export const MODE_GROUPS = [
     id: 'drafting',
     label: '文字处理',
     icon: '✍️',
-    modes: ['writer', 'outline', 'extract', 'polish', 'proofread', 'translate'],
+    modes: ['writer', 'outline', 'extract', 'polish', 'rewrite', 'proofread', 'translate', 'dict'],
   },
   {
     id: 'code',

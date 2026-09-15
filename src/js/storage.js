@@ -93,18 +93,23 @@ export function exportScriptAsTxt(content, language = 'bash', title = 'script') 
   if (!content) return
 
   const ext = { bat: 'bat', powershell: 'ps1', bash: 'sh' }[language] || 'txt'
-  const fence = '```'
+  const isWindows = language === 'bat' || language === 'powershell'
+
   let body = String(content)
 
-  // 若包含代码围栏，优先抽取围栏内的脚本本体
-  const fenceRe = new RegExp(fence + '[a-zA-Z0-9+#-]*\\n([\\s\\S]*?)' + fence)
+  // 若包含代码围栏，优先抽取围栏内的脚本本体（取第一个代码块）
+  const fenceRe = /```[a-zA-Z0-9+#-]*\n([\s\S]*?)```/
   const matched = body.match(fenceRe)
   if (matched) body = matched[1]
 
-  // 去掉首尾空行，并统一换行为 LF（避免 Windows 下 BAT 因 CRLF 混用出错）
+  // 统一换行后按目标平台输出：Windows 用 CRLF，Linux/macOS 用 LF
   body = body.replace(/\r\n/g, '\n').replace(/^\s*\n/, '').trimEnd()
+  const eol = isWindows ? '\r\n' : '\n'
+  body = body.split('\n').join(eol)
 
-  const text = body + (ext === 'bat' ? '\r\n' : '\n')
+  // Windows 必须带 UTF-8 BOM，否则 cmd / Windows PowerShell 5.1 会按 ANSI 解析导致中文注释乱码；
+  // Linux/macOS 绝不能加 BOM，否则 shebang 失效报 bad interpreter
+  const text = (isWindows ? '\ufeff' : '') + body + eol
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

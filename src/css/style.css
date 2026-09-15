@@ -648,6 +648,19 @@ body {
   display: block;
 }
 
+/* 代码 / 脚本自动换行（默认开启，长命令不再需要横向拖动） */
+.markdown-body.wrap-code pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body.wrap-code pre code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
 .markdown-body blockquote {
   border-left: 4px solid var(--accent-color);
   padding-left: 12px;
