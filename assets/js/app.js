@@ -381,6 +381,111 @@ createApp({
       }
     }
 
+    // 模式 5：Rebuttal 审稿答辩状态
+    const rebuttalComment = ref('')
+    const rebuttalResponse = ref('')
+    const rebuttalTone = ref('polite-firm')
+    const rebuttalOutput = ref('')
+    const isRebutting = ref(false)
+
+    async function runRebuttal() {
+      if (!rebuttalComment.value.trim() || isRebutting.value) return
+      isRebutting.value = true
+      rebuttalOutput.value = ''
+      const prompt = `请作为国际顶级学术期刊与会议评审专家，为以下审稿人意见（Reviewer Comment）起草一份专业且具有说服力的 Point-by-Point 答辩信草稿：\n\n` +
+        `【审稿人质疑/评审意见】：\n${rebuttalComment.value}\n\n` +
+        (rebuttalResponse.value.trim() ? `【作者答辩要点与补充证据】：\n${rebuttalResponse.value}\n\n` : '') +
+        `【答辩语气】：${rebuttalTone.value === 'polite-firm' ? '既礼貌感激，又用事实与逻辑坚定澄清误解' : (rebuttalTone.value === 'appreciative-expand' ? '充分肯定审稿人洞察，详细展开补充实验' : '谦逊诚恳，说明已在正文做出修改')}\n\n` +
+        `请使用标准学术英文撰写，包含：1. 礼貌致谢；2. 针对性解释；3. 正文具体修改标注（Action in Revised Manuscript）。`
+
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: 'You are an expert academic author skilled in peer-review rebuttal for top-tier venues like IEEE, ACM, Nature, and NeurIPS.'
+        })
+        await ChromeAIService.streamPrompt(
+          session,
+          prompt,
+          ({ full }) => {
+            rebuttalOutput.value = full
+          }
+        )
+      } catch (e) {
+        rebuttalOutput.value = `> ⚠️ **生成答辩失败**：${e.message}`
+      } finally {
+        isRebutting.value = false
+      }
+    }
+
+    // 模式 6：Proofread 语法深度纠错状态
+    const proofreadInput = ref('')
+    const proofreadStandard = ref('strict')
+    const proofreadOutput = ref('')
+    const isProofreading = ref(false)
+
+    async function runProofread() {
+      if (!proofreadInput.value.trim() || isProofreading.value) return
+      isProofreading.value = true
+      proofreadOutput.value = ''
+      const prompt = `请对以下英文学术段落进行严苛的语法检查与审校（标准：${proofreadStandard.value === 'strict' ? '顶级期刊出版级严谨标准' : '简洁清晰自然表达'}）：\n\n` +
+        `【待检查段落】：\n${proofreadInput.value}\n\n` +
+        `请输出：\n` +
+        `1. 🎯【精校全文】（符合顶级国际期刊的高质量版本）；\n` +
+        `2. 🔍【修改对照与原因分析】（逐条列出原句、修改建议及语法/搭配规则）。`
+
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: 'You are a professional academic copyeditor and grammarian for Nature and IEEE publications.'
+        })
+        await ChromeAIService.streamPrompt(
+          session,
+          prompt,
+          ({ full }) => {
+            proofreadOutput.value = full
+          }
+        )
+      } catch (e) {
+        proofreadOutput.value = `> ⚠️ **语法查错失败**：${e.message}`
+      } finally {
+        isProofreading.value = false
+      }
+    }
+
+    // 模式 7：CodeReview 代码审查与重构状态
+    const codeInput = ref('')
+    const codeLang = ref('python')
+    const codeOutput = ref('')
+    const isCodeReviewing = ref(false)
+
+    async function runCodeReview() {
+      if (!codeInput.value.trim() || isCodeReviewing.value) return
+      isCodeReviewing.value = true
+      codeOutput.value = ''
+      const prompt = `请对以下 ${codeLang.value} 代码进行全方位的架构与安全审查（Code Review）：\n\n` +
+        `\`\`\`${codeLang.value}\n${codeInput.value}\n\`\`\`\n\n` +
+        `请分析：\n` +
+        `1. ⚠️【潜在 Bug 与边界安全漏洞】；\n` +
+        `2. ⏱️【复杂度分析】（时间与空间复杂度）；\n` +
+        `3. 💡【重构与优化建议】；\n` +
+        `4. 🚀【高质量重构后代码】。`
+
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: 'You are a principal software engineer and security auditor.'
+        })
+        await ChromeAIService.streamPrompt(
+          session,
+          prompt,
+          ({ full }) => {
+            codeOutput.value = full
+          }
+        )
+      } catch (e) {
+        codeOutput.value = `> ⚠️ **代码审查失败**：${e.message}`
+      } finally {
+        isCodeReviewing.value = false
+      }
+    }
+
     // 端侧翻译实测状态
     const translateTestState = ref({
       running: false,
@@ -490,6 +595,25 @@ createApp({
       writeLength,
       isWriting,
       runWriter,
+      // Rebuttal
+      rebuttalComment,
+      rebuttalResponse,
+      rebuttalTone,
+      rebuttalOutput,
+      isRebutting,
+      runRebuttal,
+      // Proofread
+      proofreadInput,
+      proofreadStandard,
+      proofreadOutput,
+      isProofreading,
+      runProofread,
+      // CodeReview
+      codeInput,
+      codeLang,
+      codeOutput,
+      isCodeReviewing,
+      runCodeReview,
     }
   }
 }).mount('#app')

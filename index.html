@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chrome Nano AI Chat - 本地端侧大模型工作台</title>
+  <title>Nano AI Chat - 端侧大模型工作台 (Chrome & Edge)</title>
 
   <!-- 100% 本地自托管样式库 (无任何外部 CDN 依赖) -->
   <link rel="stylesheet" href="./assets/vendor/katex/katex.min.css">
@@ -96,6 +96,15 @@
             <button class="nav-tab" :class="{ active: currentMode === 'writer' }" @click="setMode('writer')">
               <span>✍️ 辅助起草</span>
             </button>
+            <button class="nav-tab" :class="{ active: currentMode === 'rebuttal' }" @click="setMode('rebuttal')">
+              <span>🛡️ 审稿答辩</span>
+            </button>
+            <button class="nav-tab" :class="{ active: currentMode === 'proofread' }" @click="setMode('proofread')">
+              <span>🔍 语法纠错</span>
+            </button>
+            <button class="nav-tab" :class="{ active: currentMode === 'codereview' }" @click="setMode('codereview')">
+              <span>💻 代码审查</span>
+            </button>
           </nav>
         </div>
 
@@ -112,8 +121,8 @@
             @click="settingsModalOpen = true"
           >
             <span class="status-dot"></span>
-            <span v-if="aiStatus.prompt === 'available'">Gemini Nano 已就绪</span>
-            <span v-else-if="aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'">端侧翻译可用 / Nano待开启</span>
+            <span v-if="aiStatus.prompt === 'available'">端侧大模型已就绪</span>
+            <span v-else-if="aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'">端侧翻译可用 / 对话模型待开启</span>
             <span v-else>端侧模型待配置</span>
           </button>
 
@@ -138,18 +147,18 @@
           <!-- 初始欢迎界面 -->
           <div v-if="!activeSession || activeSession.messages.length === 0" class="hero-container">
             <div class="brand-icon" style="width:52px;height:52px;font-size:1.8rem;border-radius:18px;">⚡</div>
-            <h1 class="hero-title">Chrome Gemini Nano</h1>
-            <p style="color:var(--text-secondary);font-size:0.95rem;max-width:480px;">
-              由 Chrome 内置端侧大模型驱动。100% 本地运算，0ms 网络延迟，无需 API Key，绝对隐私安全。
+            <h1 class="hero-title">原生端侧大模型工作台</h1>
+            <p style="color:var(--text-secondary);font-size:0.95rem;max-width:520px;">
+              基于 W3C 标准 Prompt API 规范。全面支持 <b>Google Chrome (Gemini Nano)</b> 与 <b>Microsoft Edge (Phi-4-mini / Phi-Silica)</b>。100% 本地算力，0ms 网络延迟，零 API Key 消耗，隐私安全无忧。
             </p>
 
             <!-- 环境诊断提示横幅 (若 Prompt 未就绪) -->
             <div v-if="aiStatus.prompt !== 'available'" class="hero-alert-banner" @click="settingsModalOpen = true">
               <span style="font-size:1.2rem;">💡</span>
               <div style="text-align:left;flex:1;">
-                <div style="font-weight:600;font-size:0.88rem;">检测到端侧 Gemini Nano 待开启</div>
+                <div style="font-weight:600;font-size:0.88rem;">检测到端侧对话大模型待开启</div>
                 <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px;">
-                  当前浏览器已支持端侧翻译，但对话模型 (Prompt API) 需要在 Chrome Dev/Canary 启用。点击查看环境诊断与开启教程 &gt;
+                  当前浏览器已支持端侧翻译，但通用对话模型需在 Chrome 或 Edge 的 Dev/Canary 开发者频道开启。点击查看环境诊断与开启教程 &gt;
                 </div>
               </div>
             </div>
@@ -372,6 +381,148 @@
           </div>
         </div>
       </section>
+
+      <!-- 模式 5：审稿答辩 (Rebuttal Studio) -->
+      <section v-if="currentMode === 'rebuttal'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🛡️ 审稿人质疑意见与答辩论点</span>
+            <div style="display:flex;gap:8px;">
+              <select v-model="rebuttalTone" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="polite-firm">礼貌且坚定澄清 (Polite & Firm)</option>
+                <option value="appreciative-expand">诚挚感谢并补充实验 (Appreciative & Expand)</option>
+                <option value="concede-rectify">谦逊致歉并修正正文 (Concede & Rectify)</option>
+              </select>
+            </div>
+          </div>
+          <div class="studio-card-body" style="gap:12px;">
+            <textarea
+              v-model="rebuttalComment"
+              class="studio-textarea"
+              style="min-height:120px;flex:1;"
+              placeholder="在此粘贴审稿人意见 (Reviewer Comments，例如：The baseline comparisons are insufficient and lack statistical significance...)"
+            ></textarea>
+            <textarea
+              v-model="rebuttalResponse"
+              class="studio-textarea"
+              style="min-height:90px;flex:0.8;border-top:1px dashed var(--border-color);padding-top:8px;"
+              placeholder="（可选）补充您的论点思路或新增实验数据 (例如：我们在 Table 4 补充了 5 组消融实验，p < 0.01...)"
+            ></textarea>
+            <div style="display:flex;justify-content:flex-end;">
+              <button class="btn-new-chat" style="margin:0;" :disabled="isRebutting || !rebuttalComment.trim()" @click="runRebuttal()">
+                <span v-if="isRebutting">🛡️ 正在撰写答辩信...</span>
+                <span v-else>🚀 生成 Point-by-Point 答辩信</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">📄 学术答辩信草稿 (Response Letter)</span>
+            <button v-if="rebuttalOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(rebuttalOutput)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="rebuttalOutput" class="markdown-body" v-html="renderMarkdown(rebuttalOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              左侧输入审稿人意见后点击生成，高水准英文答辩段落将实时在此呈现
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 模式 6：语法与深度纠错 (Proofread Studio) -->
+      <section v-if="currentMode === 'proofread'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🔍 输入待查错论文段落</span>
+            <div style="display:gap:8px;">
+              <select v-model="proofreadStandard" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="strict">顶级国际期刊出版级 (Strict Journal Standard)</option>
+                <option value="clarity">学术清晰度与通畅 (Clarity & Flow)</option>
+              </select>
+            </div>
+          </div>
+          <div class="studio-card-body">
+            <textarea
+              v-model="proofreadInput"
+              class="studio-textarea"
+              placeholder="在此粘贴待检查的英文草稿段落，端侧大模型将逐句诊断语法毛病、冠词错误与中式搭配..."
+            ></textarea>
+            <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+              <button class="btn-new-chat" style="margin:0;" :disabled="isProofreading || !proofreadInput.trim()" @click="runProofread()">
+                <span v-if="isProofreading">🔍 正在深度审校...</span>
+                <span v-else>🚀 开始语法与句式查错</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🎯 纠错建议与修改对照表</span>
+            <button v-if="proofreadOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(proofreadOutput)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="proofreadOutput" class="markdown-body" v-html="renderMarkdown(proofreadOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              纠错诊断与对照修改建议将在此呈现
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 模式 7：代码审查 (Code Review Studio) -->
+      <section v-if="currentMode === 'codereview'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">💻 输入待审查代码段</span>
+            <div style="display:flex;gap:8px;">
+              <select v-model="codeLang" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="python">Python</option>
+                <option value="javascript">JavaScript / TypeScript</option>
+                <option value="cpp">C / C++</option>
+                <option value="rust">Rust</option>
+                <option value="go">Go</option>
+                <option value="java">Java</option>
+              </select>
+            </div>
+          </div>
+          <div class="studio-card-body">
+            <textarea
+              v-model="codeInput"
+              class="studio-textarea"
+              style="font-family:var(--font-mono);font-size:0.88rem;"
+              placeholder="在此粘贴需要审查的算法函数或业务代码..."
+            ></textarea>
+            <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+              <button class="btn-new-chat" style="margin:0;" :disabled="isCodeReviewing || !codeInput.trim()" @click="runCodeReview()">
+                <span v-if="isCodeReviewing">💻 正在审计分析...</span>
+                <span v-else>🚀 开始代码审查与重构</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🛡️ 代码审查报告与重构版本</span>
+            <button v-if="codeOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(codeOutput)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="codeOutput" class="markdown-body" v-html="renderMarkdown(codeOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              审查报告（Bug、复杂度分析、优化重构）将在此流式呈现
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- 角色预设切换弹窗 -->
@@ -408,7 +559,7 @@
         <div style="padding:18px 24px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;">
           <h3 style="font-size:1.1rem;font-weight:700;display:flex;align-items:center;gap:8px;">
             <span>⚙️</span>
-            <span>端侧大模型状态与诊断</span>
+            <span>端侧大模型状态检测</span>
           </h3>
           <button class="icon-button" style="width:28px;height:28px;" @click="settingsModalOpen = false">✕</button>
         </div>
@@ -456,7 +607,7 @@
                   <td>W3C 标准全局对象</td>
                   <td>
                     <span v-if="aiStatus.detectedAPIs?.LanguageModel || aiStatus.prompt === 'available'" style="color:#16a34a;font-weight:600;">✅ 已就绪</span>
-                    <span v-else style="color:#d97706;font-weight:600;">⚠️ 未开启 (Gemini Nano)</span>
+                    <span v-else style="color:#d97706;font-weight:600;">⚠️ 未开启</span>
                   </td>
                 </tr>
                 <tr>
@@ -502,46 +653,9 @@
                 {{ translateTestState.error }}
               </div>
             </div>
-          </div>
 
-          <!-- 2. 核心原理与疑惑解答 -->
-          <div style="padding:14px;border-radius:14px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18);font-size:0.82rem;line-height:1.6;">
-            <div style="font-weight:700;margin-bottom:6px;color:var(--text-primary);font-size:0.88rem;">
-              ❓ 为什么“翻译项目能用”，但“对话大模型不支持且 chrome://flags 找不到”？
-            </div>
-            <ul style="padding-left:18px;margin-bottom:4px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary);">
-              <li>
-                <b>模型体积极小 vs 庞大 1.5GB LLM：</b>翻译（<code>Translator API</code>）是数十兆的专用微型模型，Google 已在普通 Chrome（包括正式版 Stable）逐步默认放开，普通轻薄本均可轻松运行；而 Gemini Nano 是完整的 <b>1.5GB ~ 3GB 通用大语言模型</b>，需要 GPU 显存与硬盘空间。
-              </li>
-              <li>
-                <b>Flags 官方隐藏机制：</b>Google 目前将 Gemini Nano Prompt API 部署在 <b>Chrome Dev 或 Canary</b> 开发者预览频道。在普通正式版 Chrome 中，<code>#prompt-api-for-gemini-nano</code> 被官方故意隐藏，因此搜索不到此 flag。
-              </li>
-            </ul>
-          </div>
-
-          <!-- 3. 开启 Gemini Nano 指南 -->
-          <div style="padding:14px;border-radius:14px;background:rgba(125,125,125,0.06);font-size:0.82rem;color:var(--text-secondary);line-height:1.6;">
-            <div style="font-weight:700;margin-bottom:8px;color:var(--text-primary);font-size:0.88rem;">🚀 开启 Gemini Nano 的标准步骤：</div>
-            <ol style="padding-left:18px;display:flex;flex-direction:column;gap:6px;">
-              <li>
-                下载安装 <b>Google Chrome Dev</b> 或 <b>Chrome Canary</b> 频道版本 (版本需 ≥ 138)；
-              </li>
-              <li>
-                在地址栏打开 <code>chrome://flags/#optimization-guide-on-device-model</code>，设为 <b>Enabled BypassPerfRequirement</b>；
-              </li>
-              <li>
-                在地址栏打开 <code>chrome://flags/#prompt-api-for-gemini-nano</code>，设为 <b>Enabled</b>；
-              </li>
-              <li>
-                重启浏览器后打开 <code>chrome://components</code>，找到 <b>Optimization Guide On Device Model</b>，点击 <b>Check for update</b>，确保模型文件 (~1.5GB) 下载完毕；
-              </li>
-              <li>
-                <b>硬件检查：</b>系统盘（C盘）建议至少保留 22GB 剩余可用空间，且具备支持 WebGPU/DirectML 的显卡。
-              </li>
-            </ol>
-
-            <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;background:rgba(125,125,125,0.1);padding:8px 12px;border-radius:8px;">
-              <span style="font-family:var(--font-mono);font-size:0.76rem;">控制台验证代码 (F12)</span>
+            <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;background:rgba(125,125,125,0.08);padding:8px 12px;border-radius:8px;">
+              <span style="font-family:var(--font-mono);font-size:0.76rem;">F12 控制台自测代码</span>
               <button class="btn-new-chat" style="margin:0;padding:4px 10px;font-size:0.75rem;height:auto;" @click="copyConsoleScript()">
                 <span v-if="copiedScript">✅ 已复制到剪贴板</span>
                 <span v-else>📋 复制自测脚本</span>

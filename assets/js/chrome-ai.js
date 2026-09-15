@@ -123,11 +123,20 @@ export class ChromeAIService {
     const lm = this.getLanguageModelAPI()
     if (lm) {
       try {
+        let avail = 'available'
         if (typeof lm.availability === 'function') {
-          status.prompt = await lm.availability()
+          avail = await lm.availability()
         } else if (typeof lm.capabilities === 'function') {
           const caps = await lm.capabilities()
-          status.prompt = caps.available === 'readily' ? 'available' : (caps.available === 'after-download' ? 'downloadable' : 'unavailable')
+          avail = caps.available
+        }
+        // 兼容标准值: 'readily', 'available', 'after-download', 'downloadable', 'downloading', 'no', 'unavailable'
+        if (avail === 'readily' || avail === 'available') {
+          status.prompt = 'available'
+        } else if (avail === 'after-download' || avail === 'downloadable' || avail === 'downloading') {
+          status.prompt = 'downloadable'
+        } else if (avail === 'no' || avail === 'unavailable') {
+          status.prompt = 'unavailable'
         } else {
           status.prompt = 'available'
         }
@@ -142,7 +151,8 @@ export class ChromeAIService {
     if (sm) {
       try {
         if (typeof sm.availability === 'function') {
-          status.summarizer = await sm.availability()
+          const avail = await sm.availability()
+          status.summarizer = (avail === 'readily' || avail === 'available') ? 'available' : 'unavailable'
         } else if (typeof sm.capabilities === 'function') {
           const caps = await sm.capabilities()
           status.summarizer = caps.available === 'readily' ? 'available' : 'unavailable'
@@ -159,7 +169,8 @@ export class ChromeAIService {
     if (rw) {
       try {
         if (typeof rw.availability === 'function') {
-          status.rewriter = await rw.availability()
+          const avail = await rw.availability()
+          status.rewriter = (avail === 'readily' || avail === 'available') ? 'available' : 'unavailable'
         } else if (typeof rw.capabilities === 'function') {
           const caps = await rw.capabilities()
           status.rewriter = caps.available === 'readily' ? 'available' : 'unavailable'
@@ -176,7 +187,8 @@ export class ChromeAIService {
     if (wr) {
       try {
         if (typeof wr.availability === 'function') {
-          status.writer = await wr.availability()
+          const avail = await wr.availability()
+          status.writer = (avail === 'readily' || avail === 'available') ? 'available' : 'unavailable'
         } else if (typeof wr.capabilities === 'function') {
           const caps = await wr.capabilities()
           status.writer = caps.available === 'readily' ? 'available' : 'unavailable'
@@ -233,11 +245,11 @@ export class ChromeAIService {
     const ModelAPI = this.getLanguageModelAPI()
     if (!ModelAPI) {
       throw new Error(
-        '当前浏览器尚未启用 Chrome Prompt API (Gemini Nano)。\n\n' +
-        '📌 为什么“翻译能用”而“自由对话”无法使用？\n' +
-        '1. 翻译（Translator API）使用的是独立轻量小模型（数十兆），Chrome 正式版已逐步默认开放；\n' +
-        '2. 对话（Gemini Nano）是 1.5GB 的端侧大语言模型，Google 目前仅在 Chrome Dev / Canary (138+) 开发者频道开放，普通正式版中 Flags 被官方隐藏；\n' +
-        '3. 解决办法：请使用 Chrome Canary / Dev 并在 chrome://flags 中开启 #prompt-api-for-gemini-nano，或点击右上角「⚙️ 状态与诊断」查看详细指引。'
+        '当前浏览器尚未启用端侧 Prompt API 大模型。\n\n' +
+        '📌 兼容性说明：\n' +
+        '1. 本应用基于 W3C 标准 Prompt API 规范构建，原生双向支持 Google Chrome (Gemini Nano) 与 Microsoft Edge (Phi-4-mini / Phi-Silica)；\n' +
+        '2. 翻译功能使用的是轻量专用小模型，主流浏览器已默认开放；而通用对话大模型目前需在 Chrome 或 Edge 的 Dev/Canary 开发者频道开启；\n' +
+        '3. 解决办法：请使用 Chrome 或 Edge 的 Dev/Canary 频道并开启对应 Flags，或点击右上角「⚙️ 状态与诊断」查看详细指引。'
       )
     }
 
@@ -260,30 +272,83 @@ export class ChromeAIService {
       }
     }
 
-    const session = await ModelAPI.create(sessionOptions)
+    // 容错机制：针对 Edge / 不同内核实现进行渐进式回退
+    let session
+    try {
+      session = await ModelAPI.create(sessionOptions)
+    } catch (createErr) {
+      console.warn('LanguageModel.create with full options failed, falling back to minimal options:', createErr)
+      try {
+        session = await ModelAPI.create(systemPrompt ? { systemPrompt } : {})
+      } catch (err2) {
+        session = await ModelAPI.create()
+      }
+    }
     return session
   }
 
   /**
-   * 流式生成对话回答 (promptStreaming)
+   * 流式生成对话回答 (promptStreaming 兼容同步流、Promise流、ReadableStream及普通prompt回退)
    */
   static async streamPrompt(session, promptText, onChunk, signal) {
     if (!session) throw new Error('会话未初始化')
 
-    const stream = session.promptStreaming(promptText, { signal })
+    // Edge 与某些实现可能返回 Promise<ReadableStream> 或同步流
+    let stream
+    try {
+      if (typeof session.promptStreaming === 'function') {
+        const res = session.promptStreaming(promptText, { signal })
+        stream = (res && typeof res.then === 'function') ? await res : res
+      }
+    } catch (e) {
+      console.warn('promptStreaming call failed, falling back to prompt():', e)
+    }
+
     let fullResponse = ''
     let previousLength = 0
 
-    for await (const chunk of stream) {
-      if (signal?.aborted) break
-      // Chrome promptStreaming 在不同版本下可能返回增量或累积文本，进行自适应容错
-      const diff = chunk.startsWith(fullResponse) ? chunk.slice(previousLength) : chunk
-      previousLength = chunk.length
-      fullResponse = chunk.startsWith(fullResponse) ? chunk : (fullResponse + chunk)
-      onChunk?.({ chunk: diff, full: fullResponse })
+    // 模式 A：支持 AsyncIterable (for await)
+    if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
+      for await (const chunk of stream) {
+        if (signal?.aborted) break
+        const diff = chunk.startsWith(fullResponse) ? chunk.slice(previousLength) : chunk
+        previousLength = chunk.length
+        fullResponse = chunk.startsWith(fullResponse) ? chunk : (fullResponse + chunk)
+        onChunk?.({ chunk: diff, full: fullResponse })
+      }
+      return fullResponse
     }
 
-    return fullResponse
+    // 模式 B：标准 Web ReadableStream (getReader)
+    if (stream && typeof stream.getReader === 'function') {
+      const reader = stream.getReader()
+      const decoder = new TextDecoder()
+      try {
+        while (true) {
+          if (signal?.aborted) break
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk = typeof value === 'string' ? value : decoder.decode(value, { stream: true })
+          const diff = chunk.startsWith(fullResponse) ? chunk.slice(previousLength) : chunk
+          previousLength = chunk.length
+          fullResponse = chunk.startsWith(fullResponse) ? chunk : (fullResponse + chunk)
+          onChunk?.({ chunk: diff, full: fullResponse })
+        }
+      } finally {
+        reader.releaseLock()
+      }
+      return fullResponse
+    }
+
+    // 模式 C：降级回退 session.prompt()，彻底杜绝发消息卡死
+    if (typeof session.prompt === 'function') {
+      const res = await session.prompt(promptText, { signal })
+      fullResponse = typeof res === 'string' ? res : JSON.stringify(res)
+      onChunk?.({ chunk: fullResponse, full: fullResponse })
+      return fullResponse
+    }
+
+    throw new Error('当前端侧会话无可用生成方法')
   }
 
   /**
