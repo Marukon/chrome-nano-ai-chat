@@ -92,11 +92,22 @@ createApp({
       return ROLE_PRESETS.find(r => r.id === roleId) || ROLE_PRESETS[0]
     })
 
-    // 全局角色上下文：左下角选定的角色对「自由对话」与所有 Studio 功能同时生效
-    const roleContextPrompt = computed(() => {
-      return `【全局角色风格要求】用户当前选定的专业角色为「${currentRole.value.name}」（${currentRole.value.desc}）。` +
-        `请在保证本任务专业性与准确性的前提下，遵循该角色的表达风格与侧重点：${currentRole.value.systemPrompt}`
-    })
+    // 工具面板（Studio）共用的中断控制器
+    const studioAbort = ref(null)
+
+    // 停止当前工具面板的生成（保留已输出的部分内容）
+    function stopStudio() {
+      if (studioAbort.value) {
+        studioAbort.value.abort()
+        studioAbort.value = null
+      }
+      isSummarizing.value = false
+      isRewriting.value = false
+      isWriting.value = false
+      isRebutting.value = false
+      isProofreading.value = false
+      isCodeReviewing.value = false
+    }
 
     // Markdown 解析与 LaTeX 公式渲染器
     // 渲染结果缓存：流式输出时每帧都会重算整条消息，
@@ -422,11 +433,31 @@ createApp({
       createNewSession(role.id)
     }
 
-    // 快速填入示例问题
-    function useQuickPrompt(promptText) {
-      currentInput.value = promptText
-      nextTick(autoGrowInput)
-      sendMessage()
+    // 欢迎页「从角色开始」的精选角色
+    const HERO_ROLE_IDS = [
+      'sci-reviewer',
+      'academic-editor',
+      'feynman-tutor',
+      'math-derivation',
+      'code-architect',
+      'academic-mentor',
+    ]
+    const quickRoles = computed(() =>
+      HERO_ROLE_IDS
+        .map(id => ROLE_PRESETS.find(r => r.id === id))
+        .filter(Boolean)
+    )
+
+    // 选中角色并聚焦输入框（不自动发送消息，避免浪费一次端侧推理）
+    function startWithRole(roleId) {
+      const role = ROLE_PRESETS.find(r => r.id === roleId) || ROLE_PRESETS[0]
+      applyRole(roleId)
+      nextTick(() => {
+        autoGrowInput()
+        inputRef.value?.focus()
+        scrollToBottom(true)
+      })
+      showToast(`已切换为「${role.name}」，直接输入问题即可`)
     }
 
     // 运行 Summarizer 模式
@@ -435,6 +466,7 @@ createApp({
       isSummarizing.value = true
       summarizeOutput.value = ''
       const record = ensureStudioSession('summarizer')
+      studioAbort.value = new AbortController()
       try {
         await ChromeAIService.summarize(
           summarizeInput.value,
@@ -442,11 +474,11 @@ createApp({
             type: summarizeType.value,
             length: summarizeLength.value,
             format: summarizeFormat.value,
-            sharedContext: roleContextPrompt.value,
           },
           (chunk) => {
             summarizeOutput.value = chunk
-          }
+          },
+          studioAbort.value.signal
         )
       } catch (e) {
         summarizeOutput.value = `> ⚠️ **摘要失败**：${e.message}`
@@ -457,6 +489,7 @@ createApp({
           output: summarizeOutput.value,
         })
         isSummarizing.value = false
+        studioAbort.value = null
       }
     }
 
@@ -466,17 +499,18 @@ createApp({
       isRewriting.value = true
       rewriteOutput.value = ''
       const record = ensureStudioSession('rewriter')
+      studioAbort.value = new AbortController()
       try {
         await ChromeAIService.rewrite(
           rewriteInput.value,
           {
             tone: rewriteTone.value,
             length: rewriteLength.value,
-            sharedContext: roleContextPrompt.value,
           },
           (chunk) => {
             rewriteOutput.value = chunk
-          }
+          },
+          studioAbort.value.signal
         )
       } catch (e) {
         rewriteOutput.value = `> ⚠️ **润色失败**：${e.message}`
@@ -487,6 +521,7 @@ createApp({
           output: rewriteOutput.value,
         })
         isRewriting.value = false
+        studioAbort.value = null
       }
     }
 
@@ -496,6 +531,7 @@ createApp({
       isWriting.value = true
       writeOutput.value = ''
       const record = ensureStudioSession('writer')
+      studioAbort.value = new AbortController()
       try {
         await ChromeAIService.write(
           writePrompt.value,
@@ -503,11 +539,11 @@ createApp({
             tone: writeTone.value,
             length: writeLength.value,
             context: writeContext.value,
-            roleContext: roleContextPrompt.value,
           },
           (chunk) => {
             writeOutput.value = chunk
-          }
+          },
+          studioAbort.value.signal
         )
       } catch (e) {
         writeOutput.value = `> ⚠️ **起草失败**：${e.message}`
@@ -519,6 +555,7 @@ createApp({
           output: writeOutput.value,
         })
         isWriting.value = false
+        studioAbort.value = null
       }
     }
 
@@ -534,6 +571,7 @@ createApp({
       isRebutting.value = true
       rebuttalOutput.value = ''
       const record = ensureStudioSession('rebuttal')
+      studioAbort.value = new AbortController()
       const prompt = `请作为国际顶级学术期刊与会议评审专家，为以下审稿人意见（Reviewer Comment）起草一份专业且具有说服力的 Point-by-Point 答辩信草稿：\n\n` +
         `【审稿人质疑/评审意见】：\n${rebuttalComment.value}\n\n` +
         (rebuttalResponse.value.trim() ? `【作者答辩要点与补充证据】：\n${rebuttalResponse.value}\n\n` : '') +
@@ -543,14 +581,14 @@ createApp({
       try {
         const session = await ChromeAIService.createChatSession({
           systemPrompt: 'You are an expert academic author skilled in peer-review rebuttal for top-tier venues like IEEE, ACM, Nature, and NeurIPS.'
-            + '\n\n' + roleContextPrompt.value
         })
         await ChromeAIService.streamPrompt(
           session,
           prompt,
           ({ full }) => {
             rebuttalOutput.value = full
-          }
+          },
+          studioAbort.value.signal
         )
       } catch (e) {
         rebuttalOutput.value = `> ⚠️ **生成答辩失败**：${e.message}`
@@ -562,6 +600,7 @@ createApp({
           output: rebuttalOutput.value,
         })
         isRebutting.value = false
+        studioAbort.value = null
       }
     }
 
@@ -576,6 +615,7 @@ createApp({
       isProofreading.value = true
       proofreadOutput.value = ''
       const record = ensureStudioSession('proofread')
+      studioAbort.value = new AbortController()
       const prompt = `请对以下英文学术段落进行严苛的语法检查与审校（标准：${proofreadStandard.value === 'strict' ? '顶级期刊出版级严谨标准' : '简洁清晰自然表达'}）：\n\n` +
         `【待检查段落】：\n${proofreadInput.value}\n\n` +
         `请输出：\n` +
@@ -585,14 +625,14 @@ createApp({
       try {
         const session = await ChromeAIService.createChatSession({
           systemPrompt: 'You are a professional academic copyeditor and grammarian for Nature and IEEE publications.'
-            + '\n\n' + roleContextPrompt.value
         })
         await ChromeAIService.streamPrompt(
           session,
           prompt,
           ({ full }) => {
             proofreadOutput.value = full
-          }
+          },
+          studioAbort.value.signal
         )
       } catch (e) {
         proofreadOutput.value = `> ⚠️ **语法查错失败**：${e.message}`
@@ -603,6 +643,7 @@ createApp({
           output: proofreadOutput.value,
         })
         isProofreading.value = false
+        studioAbort.value = null
       }
     }
 
@@ -617,6 +658,7 @@ createApp({
       isCodeReviewing.value = true
       codeOutput.value = ''
       const record = ensureStudioSession('codereview')
+      studioAbort.value = new AbortController()
       const prompt = `请对以下 ${codeLang.value} 代码进行全方位的架构与安全审查（Code Review）：\n\n` +
         `\`\`\`${codeLang.value}\n${codeInput.value}\n\`\`\`\n\n` +
         `请分析：\n` +
@@ -628,14 +670,14 @@ createApp({
       try {
         const session = await ChromeAIService.createChatSession({
           systemPrompt: 'You are a principal software engineer and security auditor.'
-            + '\n\n' + roleContextPrompt.value
         })
         await ChromeAIService.streamPrompt(
           session,
           prompt,
           ({ full }) => {
             codeOutput.value = full
-          }
+          },
+          studioAbort.value.signal
         )
       } catch (e) {
         codeOutput.value = `> ⚠️ **代码审查失败**：${e.message}`
@@ -646,6 +688,7 @@ createApp({
           output: codeOutput.value,
         })
         isCodeReviewing.value = false
+        studioAbort.value = null
       }
     }
 
@@ -690,8 +733,6 @@ createApp({
           id: `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           title: `${meta.icon} ${meta.label}`,
           mode,
-          roleId: currentRole.value.id,
-          systemPrompt: currentRole.value.systemPrompt,
           studio: {},
           messages: [],
           createdAt: Date.now(),
@@ -840,7 +881,8 @@ createApp({
       stopGenerating,
       toggleTheme,
       copyToClipboard,
-      useQuickPrompt,
+      quickRoles,
+      startWithRole,
       exportSessionToMarkdown,
       // Diagnostics
       translateTestState,
@@ -869,6 +911,7 @@ createApp({
       writeLength,
       isWriting,
       runWriter,
+      stopStudio,
       // Rebuttal
       rebuttalComment,
       rebuttalResponse,

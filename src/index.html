@@ -112,8 +112,8 @@
         </div>
 
         <div class="nav-actions">
-          <!-- 全局角色指示（对所有功能生效） -->
-          <div class="role-badge" title="当前全局角色设定：对自由对话与全部工具同时生效，点击切换" @click="roleModalOpen = true">
+          <!-- 角色指示（仅自由对话生效，工具面板使用各自的专家提示词） -->
+          <div v-show="currentMode === 'chat'" class="role-badge" title="当前对话角色：仅对自由对话生效，点击切换" @click="roleModalOpen = true">
             <span>{{ currentRole.avatar }}</span>
             <span class="role-name">{{ currentRole.name }}</span>
           </div>
@@ -172,22 +172,17 @@
               </div>
             </div>
 
+            <!-- 从角色开始：只切换人设，不自动发送消息 -->
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:8px;">选择一个角色开始（下方输入框直接提问）：</div>
             <div class="quick-prompts">
-              <div class="glass-card quick-prompt-card" @click="useQuickPrompt('帮我审阅这段学术论文摘要的逻辑严密性并提出批评：\n')">
-                <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px;">🧐 SCI 论文批判审稿</div>
-                <div style="font-size:0.8rem;color:var(--text-muted);">寻找论文潜在逻辑漏洞与不足</div>
-              </div>
-              <div class="glass-card quick-prompt-card" @click="useQuickPrompt('用费曼学习法，通过生活常识向我解释什么是“注意力机制 (Self-Attention)”：')">
-                <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px;">🧠 费曼大白话讲解</div>
-                <div style="font-size:0.8rem;color:var(--text-muted);">生动形象地拆解硬核科学概念</div>
-              </div>
-              <div class="glass-card quick-prompt-card" @click="useQuickPrompt('请将以下中式英语改写为符合 Nature / IEEE 规范的地道学术英文：\n')">
-                <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px;">✍️ 学术英语高级润色</div>
-                <div style="font-size:0.8rem;color:var(--text-muted);">提升学术选词与句型丰富度</div>
-              </div>
-              <div class="glass-card quick-prompt-card" @click="useQuickPrompt('推导贝叶斯公式并解释其在机器学习参数估计中的物理意义（请使用 LaTeX 公式）：')">
-                <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px;">📐 数学公式推导</div>
-                <div style="font-size:0.8rem;color:var(--text-muted);">渲染严谨美观的 LaTeX 数学推导</div>
+              <div
+                v-for="role in quickRoles"
+                :key="role.id"
+                class="glass-card quick-prompt-card"
+                @click="startWithRole(role.id)"
+              >
+                <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px;">{{ role.avatar }} {{ role.name }}</div>
+                <div style="font-size:0.8rem;color:var(--text-muted);">{{ role.desc }}</div>
               </div>
             </div>
           </div>
@@ -277,9 +272,12 @@
               placeholder="在此粘贴大段英文文献、Abstract 或会议论文正文..."
             ></textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-              <button class="btn-new-chat" style="margin:0;" :disabled="isSummarizing || !summarizeInput.trim()" @click="runSummarizer()">
-                <span v-if="isSummarizing">⏳ 正在提炼摘要...</span>
-                <span v-else>🚀 开始提炼摘要</span>
+              <button v-if="isSummarizing" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!summarizeInput.trim()" @click="runSummarizer()">
+                <span>🚀 开始提炼摘要</span>
               </button>
             </div>
           </div>
@@ -326,9 +324,12 @@
               placeholder="输入需要润色的中式英语或论文初稿..."
             ></textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-              <button class="btn-new-chat" style="margin:0;" :disabled="isRewriting || !rewriteInput.trim()" @click="runRewriter()">
-                <span v-if="isRewriting">✨ 正在深度润色...</span>
-                <span v-else>✨ 一键学术润色</span>
+              <button v-if="isRewriting" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!rewriteInput.trim()" @click="runRewriter()">
+                <span>✨ 一键学术润色</span>
               </button>
             </div>
           </div>
@@ -375,9 +376,12 @@
               placeholder="补充上下文或要点列表 (例如：我们补充了 3 组对照实验，并在正文第 4 节更新了图表 5...)"
             ></textarea>
             <div style="display:flex;justify-content:flex-end;">
-              <button class="btn-new-chat" style="margin:0;" :disabled="isWriting || !writePrompt.trim()" @click="runWriter()">
-                <span v-if="isWriting">📝 正在起草中...</span>
-                <span v-else>🚀 开始起草</span>
+              <button v-if="isWriting" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!writePrompt.trim()" @click="runWriter()">
+                <span>🚀 开始起草</span>
               </button>
             </div>
           </div>
@@ -426,9 +430,12 @@
               placeholder="（可选）补充您的论点思路或新增实验数据 (例如：我们在 Table 4 补充了 5 组消融实验，p < 0.01...)"
             ></textarea>
             <div style="display:flex;justify-content:flex-end;">
-              <button class="btn-new-chat" style="margin:0;" :disabled="isRebutting || !rebuttalComment.trim()" @click="runRebuttal()">
-                <span v-if="isRebutting">🛡️ 正在撰写答辩信...</span>
-                <span v-else>🚀 生成 Point-by-Point 答辩信</span>
+              <button v-if="isRebutting" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!rebuttalComment.trim()" @click="runRebuttal()">
+                <span>🚀 生成 Point-by-Point 答辩信</span>
               </button>
             </div>
           </div>
@@ -469,9 +476,12 @@
               placeholder="在此粘贴待检查的英文草稿段落，端侧大模型将逐句诊断语法毛病、冠词错误与中式搭配..."
             ></textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-              <button class="btn-new-chat" style="margin:0;" :disabled="isProofreading || !proofreadInput.trim()" @click="runProofread()">
-                <span v-if="isProofreading">🔍 正在深度审校...</span>
-                <span v-else>🚀 开始语法与句式查错</span>
+              <button v-if="isProofreading" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!proofreadInput.trim()" @click="runProofread()">
+                <span>🚀 开始语法与句式查错</span>
               </button>
             </div>
           </div>
@@ -517,9 +527,12 @@
               placeholder="在此粘贴需要审查的算法函数或业务代码..."
             ></textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-              <button class="btn-new-chat" style="margin:0;" :disabled="isCodeReviewing || !codeInput.trim()" @click="runCodeReview()">
-                <span v-if="isCodeReviewing">💻 正在审计分析...</span>
-                <span v-else>🚀 开始代码审查与重构</span>
+              <button v-if="isCodeReviewing" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!codeInput.trim()" @click="runCodeReview()">
+                <span>🚀 开始代码审查与重构</span>
               </button>
             </div>
           </div>
@@ -550,7 +563,8 @@
           <button class="icon-button" style="width:28px;height:28px;" @click="roleModalOpen = false">✕</button>
         </div>
         <p style="font-size:0.8rem;color:var(--text-secondary);margin:-8px 0 14px;line-height:1.6;">
-          角色 = 注入给端侧大模型的<b>系统提示词（人设与表达风格）</b>，对<b>自由对话与全部 6 个工具</b>同时生效。
+          角色 = 注入给端侧大模型的<b>系统提示词（人设与表达风格）</b>，<b>仅作用于自由对话</b>；
+          论文摘要、润色等工具使用各自内置的专家提示词，不受角色影响。
           每个会话会记住自己的角色；当前会话为空时切换角色直接沿用，否则为你新建一个会话。
         </p>
         <div style="display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto;">
