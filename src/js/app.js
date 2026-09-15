@@ -670,16 +670,13 @@ createApp({
       showToast(`已套用「${scene.label.replace(/^\S+\s/, '')}」模板，补充细节后开始起草`)
     }
 
-    // 欢迎页「从角色开始」的精选角色（覆盖论文、语言、工程、学习等不同维度）
+    // 欢迎页「从角色开始」的精选角色
+    // 仅首页快捷入口使用这四个；输入框与角色弹窗里的完整角色库不受影响
     const HERO_ROLE_IDS = [
-      'sci-reviewer',      // 论文评审
-      'rebuttal-expert',   // 审稿答辩
-      'academic-editor',   // 学术英语
-      'translator-pro',    // 学术翻译
-      'code-architect',    // 代码架构
-      'devops-script',     // 脚本自动化
-      'feynman-tutor',     // 费曼讲解
-      'math-derivation',   // 公式推导
+      'sci-reviewer',      // 🧐 SCI 论文苛刻审稿人
+      'academic-editor',   // ✍️ 学术英语母语编辑
+      'code-architect',    // 💻 全栈架构与代码审计专家
+      'devops-script',     // 🧩 脚本与自动化运维专家
     ]
     const quickRoles = computed(() =>
       HERO_ROLE_IDS

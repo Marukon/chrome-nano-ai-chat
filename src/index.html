@@ -178,17 +178,20 @@
               基于 W3C 标准 Prompt API 规范。全面支持 <b>Google Chrome (Gemini Nano)</b> 与 <b>Microsoft Edge (Phi-4-mini / Phi-Silica)</b>。100% 本地算力，0ms 网络延迟，零 API Key 消耗，隐私安全无忧。
             </p>
 
-            <!-- 从角色开始：只切换人设，不自动发送消息 -->
-            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:8px;">选择一个角色开始（下方输入框直接提问）：</div>
-            <div class="quick-prompts">
+            <!-- 从角色开始：只切换人设，不自动发送消息（仅首页快捷入口） -->
+            <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">选择一个角色开始（下方输入框直接提问）：</div>
+            <div class="hero-roles">
               <div
                 v-for="role in quickRoles"
                 :key="role.id"
-                class="glass-card quick-prompt-card"
+                class="glass-card hero-role-card"
                 @click="startWithRole(role.id)"
               >
-                <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px;">{{ role.avatar }} {{ role.name }}</div>
-                <div style="font-size:0.8rem;color:var(--text-muted);">{{ role.desc }}</div>
+                <span class="hero-role-avatar">{{ role.avatar }}</span>
+                <div class="hero-role-text">
+                  <div class="hero-role-name">{{ role.name }}</div>
+                  <div class="hero-role-desc">{{ role.desc }}</div>
+                </div>
               </div>
             </div>
           </div>

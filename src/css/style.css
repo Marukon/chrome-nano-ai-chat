@@ -938,24 +938,57 @@ body {
   -webkit-text-fill-color: transparent;
 }
 
-.quick-prompts {
+/* 首页精选角色入口：2×2 紧凑网格，保持首页轻快不臃肿 */
+.hero-roles {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
-  margin-top: 16px;
+  margin-top: 4px;
 }
 
-.quick-prompt-card {
-  padding: 14px 16px;
+.hero-role-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
   text-align: left;
   cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.quick-prompt-card:hover {
+.hero-role-card:hover {
   border-color: var(--accent-color);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
   box-shadow: var(--shadow-md);
+}
+
+.hero-role-avatar {
+  font-size: 1.15rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.hero-role-text {
+  min-width: 0;
+}
+
+.hero-role-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hero-role-desc {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 挂载前保护：Vue 接管之前 v-if 尚未生效，模板里的弹窗内容会先裸露一帧
@@ -1468,7 +1501,8 @@ html:not(.mounted) .modal-backdrop {
     padding: 24px 12px;
     gap: 12px;
   }
-  .quick-prompts {
+  /* 极窄屏下角色卡描述太挤，改单列 */
+  .hero-roles {
     grid-template-columns: 1fr;
   }
 
