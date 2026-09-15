@@ -46,19 +46,18 @@ createApp({
     // 窄屏（≤1024px）侧边栏为抽屉模式，默认收起；宽屏默认展开
     const sidebarOpen = ref(window.innerWidth > 1024)
     const settingsModalOpen = ref(false)
-    // 端侧模型检测报告浮层（锚定在顶栏胶囊下方，不再用模态框）
-    const diagOpen = ref(false)
+    // 端侧模型检测弹窗（仅在模型不可用时自动弹出一次）
+    const diagModalOpen = ref(false)
+    // 自动弹窗只触发一次，避免用户关掉后又被反复弹出来
+    let diagAutoShown = false
 
-    // 展开 / 收起检测浮层（首次展开时顺带刷新一次）
-    function toggleDiagPanel(forceOpen = false) {
-      const next = forceOpen === true ? true : !diagOpen.value
-      diagOpen.value = next
-      if (next && aiStatus.value.prompt === 'checking' && !statusPromise) {
-        checkSystemAI()
-      }
-    }
+    // 仅在"确实不可用"时才在顶栏显示检测入口；能用时界面保持干净无提示
+    const diagNeeded = computed(() => {
+      const p = aiStatus.value?.prompt
+      return p === 'checking' || p === 'unavailable'
+    })
 
-    // 检测条目：把状态映射成浮层里的列表（含检测中态）
+    // 检测条目：把状态映射成弹窗里的列表（含检测中过渡态）
     const diagItems = computed(() => {
       const s = aiStatus.value || {}
       const checking = s.prompt === 'checking'
@@ -269,8 +268,18 @@ createApp({
         })
         .finally(() => {
           statusPromise = null
+          autoOpenDiagIfUnavailable()
         })
       return statusPromise
+    }
+
+    // 端侧对话模型确实不可用时，自动弹出检测窗口一次（可用则完全不打扰）
+    function autoOpenDiagIfUnavailable() {
+      if (diagAutoShown) return
+      if (aiStatus.value?.prompt === 'unavailable') {
+        diagAutoShown = true
+        diagModalOpen.value = true
+      }
     }
 
     // 切换模式
@@ -1465,20 +1474,18 @@ createApp({
       checkSystemAI()
 
       try {
-        // 点击外部时收起二级菜单与检测浮层
+        // 点击顶栏菜单外部时收起二级菜单
         document.addEventListener('click', (e) => {
-          const inNavGroup = typeof e.target?.closest === 'function' && e.target.closest('.nav-group')
-          if (!inNavGroup) openMenu.value = ''
-
-          const inDiag = typeof e.target?.closest === 'function' && e.target.closest('.diag-anchor')
-          if (!inDiag) diagOpen.value = false
+          if (typeof e.target?.closest === 'function' && e.target.closest('.nav-group')) return
+          openMenu.value = ''
         })
 
-        // Esc 关闭检测浮层
+        // Esc 关闭二级菜单与弹窗
         document.addEventListener('keydown', (e) => {
           if (e.key === 'Escape') {
-            diagOpen.value = false
             openMenu.value = ''
+            diagModalOpen.value = false
+            settingsModalOpen.value = false
           }
         })
 
@@ -1518,8 +1525,8 @@ createApp({
       activeSessionId,
       sidebarOpen,
       settingsModalOpen,
-      diagOpen,
-      toggleDiagPanel,
+      diagModalOpen,
+      diagNeeded,
       diagItems,
       roleModalOpen,
       ROLE_PRESETS,

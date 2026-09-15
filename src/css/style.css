@@ -1002,7 +1002,7 @@ body {
   background: currentColor;
 }
 
-/* ===== 端侧模型检测：按钮动画 + 浮动报告面板 ===== */
+/* ===== 端侧模型检测：按钮旋转动画 + 弹窗内容 ===== */
 
 .diag-anchor {
   position: relative;
@@ -1026,43 +1026,15 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* 展开状态下按钮加深，形成"按下"感 */
-.status-pill.open {
-  background: rgba(125, 125, 125, 0.16);
-  color: var(--text-primary);
-}
-
-/* 浮动报告面板 */
-.diag-panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  width: 340px;
-  max-width: calc(100vw - 24px);
-  border-radius: 14px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-lg);
-  z-index: 80;
-  overflow: hidden;
-}
-
-.diag-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.diag-panel-body {
-  padding: 12px 14px 14px;
+/* 检测矩阵（弹窗内） */
+.diag-matrix {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: min(60vh, 460px);
-  overflow-y: auto;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(125, 125, 125, 0.05);
+  border: 1px solid var(--border-color);
 }
 
 .diag-row {
@@ -1184,24 +1156,6 @@ body {
 .diag-mini-btn:disabled {
   opacity: 0.55;
   cursor: default;
-}
-
-/* 浮层弹出动画 */
-.diag-pop-enter-active,
-.diag-pop-leave-active {
-  transition: opacity 0.16s ease, transform 0.16s ease;
-}
-
-.diag-pop-enter-from,
-.diag-pop-leave-to {
-  opacity: 0;
-  transform: translateY(-6px) scale(0.98);
-}
-
-@media (max-width: 640px) {
-  .diag-panel {
-    width: 300px;
-  }
 }
 
 /* 检测中：只显示呼吸的骨架条，避免文案跳变 */

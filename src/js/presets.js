@@ -33,7 +33,13 @@ export const MODE_GROUPS = [
     id: 'drafting',
     label: '文字处理',
     icon: '✍️',
-    modes: ['writer', 'outline', 'wash', 'extract', 'polish', 'proofread', 'translate', 'dict'],
+    modes: ['writer', 'outline', 'wash', 'extract', 'polish', 'proofread'],
+  },
+  {
+    id: 'language',
+    label: '语言工具',
+    icon: '🌐',
+    modes: ['translate', 'dict'],
   },
   {
     id: 'code',

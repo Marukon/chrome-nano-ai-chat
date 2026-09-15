@@ -128,95 +128,24 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           </button>
 
-          <!-- 端侧模型检测：按钮自带检测动画，报告以浮层展开（不遮挡、不自动弹出） -->
-          <div class="diag-anchor">
+          <!-- 端侧模型检测按钮
+               能用时完全不提示（连按钮都不占位）；不能用时自动弹出检测窗口。
+               检测中显示环形旋转动画。 -->
+          <div v-if="diagNeeded" class="diag-anchor">
             <button
               class="status-pill"
               :class="{
                 'checking': aiStatus.prompt === 'checking',
-                'ready': aiStatus.prompt === 'available',
-                'warn': aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && (aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'),
-                'unavail': aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && !(aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'),
-                'open': diagOpen
+                'unavail': aiStatus.prompt !== 'checking'
               }"
-              :title="aiStatus.prompt === 'checking' ? '正在检测端侧模型…' : '点击查看端侧模型检测报告'"
-              @click="toggleDiagPanel()"
+              :title="aiStatus.prompt === 'checking' ? '正在检测端侧模型…' : '端侧模型不可用，点击查看检测与开启指引'"
+              @click="diagModalOpen = true"
             >
-              <!-- 检测中：环形旋转动画；完成后转为状态圆点 -->
               <span v-if="aiStatus.prompt === 'checking'" class="status-spinner"></span>
               <span v-else class="status-dot"></span>
               <span v-if="aiStatus.prompt === 'checking'" class="status-skeleton"></span>
-              <span v-else-if="aiStatus.prompt === 'available'" class="status-check">✓</span>
-              <span v-else-if="aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'">仅翻译</span>
               <span v-else>待配置</span>
             </button>
-
-            <!-- 检测报告浮层：锚定在按钮下方，点击外部关闭 -->
-            <transition name="diag-pop">
-              <div v-if="diagOpen" class="diag-panel" @click.stop>
-                <div class="diag-panel-head">
-                  <span style="font-weight:700;font-size:0.88rem;">🔬 端侧模型检测</span>
-                  <div style="display:flex;gap:6px;align-items:center;">
-                    <button class="diag-mini-btn" :disabled="aiStatus.prompt === 'checking'" @click="checkSystemAI()">
-                      <span v-if="aiStatus.prompt === 'checking'">检测中…</span>
-                      <span v-else>重新检测</span>
-                    </button>
-                    <button class="diag-mini-btn" @click="diagOpen = false">✕</button>
-                  </div>
-                </div>
-
-                <div class="diag-panel-body">
-                  <!-- API 检测矩阵 -->
-                  <div class="diag-row" v-for="item in diagItems" :key="item.name">
-                    <div style="min-width:0;">
-                      <div class="diag-row-name">{{ item.name }}</div>
-                      <div class="diag-row-sub">{{ item.sub }}</div>
-                    </div>
-                    <span class="diag-badge" :class="item.state">
-                      <span v-if="item.state === 'ok'">✓ 已就绪</span>
-                      <span v-else-if="item.state === 'part'">部分支持</span>
-                      <span v-else-if="item.state === 'checking'">检测中</span>
-                      <span v-else>未开启</span>
-                    </span>
-                  </div>
-
-                  <!-- 端侧推理实测 -->
-                  <div class="diag-test">
-                    <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:6px;">
-                      💡 实测端侧推理能力（本地原生翻译）
-                    </div>
-                    <button
-                      class="btn-new-chat"
-                      style="margin:0;width:100%;justify-content:center;padding:6px 12px;font-size:0.8rem;height:auto;"
-                      :disabled="translateTestState.running || !(aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available')"
-                      @click="runTranslateTest()"
-                    >
-                      <span v-if="translateTestState.running">⏳ 推理中…</span>
-                      <span v-else>⚡ 运行端侧翻译测试</span>
-                    </button>
-                    <div v-if="translateTestState.result" class="diag-result ok">
-                      成功：{{ translateTestState.result }}（{{ translateTestState.duration }}ms）
-                    </div>
-                    <div v-else-if="translateTestState.error" class="diag-result err">
-                      {{ translateTestState.error }}
-                    </div>
-                  </div>
-
-                  <!-- 未就绪时的开启指引 -->
-                  <div v-if="aiStatus.prompt !== 'available'" class="diag-tip">
-                    <b>如何开启端侧模型：</b><br>
-                    · Chrome 138+：<code>chrome://flags/#prompt-api-for-gemini-nano</code> 设为 Enabled<br>
-                    · 也可访问 <code>chrome://on-device-internals</code> 查看模型下载进度<br>
-                    · 首次使用需要下载模型，请保持网络畅通并稍等几分钟
-                  </div>
-
-                  <button class="diag-mini-btn" style="width:100%;justify-content:center;" @click="copyConsoleScript()">
-                    <span v-if="copiedScript">✅ 已复制自测脚本</span>
-                    <span v-else>📋 复制 F12 控制台自测脚本</span>
-                  </button>
-                </div>
-              </div>
-            </transition>
           </div>
 
           <!-- 参数设置弹窗按钮 -->
@@ -240,17 +169,6 @@
             <p style="color:var(--text-secondary);font-size:0.95rem;max-width:520px;">
               基于 W3C 标准 Prompt API 规范。全面支持 <b>Google Chrome (Gemini Nano)</b> 与 <b>Microsoft Edge (Phi-4-mini / Phi-Silica)</b>。100% 本地算力，0ms 网络延迟，零 API Key 消耗，隐私安全无忧。
             </p>
-
-            <!-- 环境诊断提示横幅（检测完成后、且模型确实未就绪才出现，避免闪现） -->
-            <div v-if="aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && aiStatus.prompt !== 'downloadable'" class="hero-alert-banner" @click="toggleDiagPanel(true)">
-              <span style="font-size:1.2rem;">💡</span>
-              <div style="text-align:left;flex:1;">
-                <div style="font-weight:600;font-size:0.88rem;">检测到端侧对话大模型待开启</div>
-                <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px;">
-                  当前浏览器已支持端侧翻译，但通用对话模型需在 Chrome 或 Edge 的 Dev/Canary 开发者频道开启。点击查看环境诊断与开启教程 &gt;
-                </div>
-              </div>
-            </div>
 
             <!-- 从角色开始：只切换人设，不自动发送消息 -->
             <div style="font-size:0.8rem;color:var(--text-muted);margin-top:8px;">选择一个角色开始（下方输入框直接提问）：</div>
@@ -1122,7 +1040,79 @@
       </div>
     </div>
 
-    <!-- 模型参数设置弹窗（与状态检测分离） -->
+    <!-- 端侧大模型检测弹窗（仅在模型不可用时自动弹出一次，也可点状态按钮打开） -->
+    <div v-if="diagModalOpen" class="modal-backdrop" @click.self="diagModalOpen = false">
+      <div class="modal-content glass-card">
+        <div style="padding:18px 24px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;">
+          <h3 style="font-size:1.1rem;font-weight:700;display:flex;align-items:center;gap:8px;">
+            <span>🔬</span>
+            <span>端侧大模型状态检测</span>
+          </h3>
+          <button class="icon-button" style="width:28px;height:28px;" @click="diagModalOpen = false">✕</button>
+        </div>
+
+        <div class="modal-body-scroll" style="display:flex;flex-direction:column;gap:18px;">
+          <!-- API 检测矩阵 -->
+          <div class="diag-matrix">
+            <div class="diag-row" v-for="item in diagItems" :key="item.name">
+              <div style="min-width:0;">
+                <div class="diag-row-name">{{ item.name }}</div>
+                <div class="diag-row-sub">{{ item.sub }}</div>
+              </div>
+              <span class="diag-badge" :class="item.state">
+                <span v-if="item.state === 'ok'">✓ 已就绪</span>
+                <span v-else-if="item.state === 'part'">部分支持</span>
+                <span v-else-if="item.state === 'checking'">检测中</span>
+                <span v-else>未开启</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- 端侧推理实测 -->
+          <div class="diag-test">
+            <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">
+              💡 实测端侧推理能力（本地原生翻译）
+            </div>
+            <button
+              class="btn-new-chat"
+              style="margin:0;width:100%;justify-content:center;"
+              :disabled="translateTestState.running || !(aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available')"
+              @click="runTranslateTest()"
+            >
+              <span v-if="translateTestState.running">⏳ 推理中…</span>
+              <span v-else>⚡ 运行端侧翻译测试</span>
+            </button>
+            <div v-if="translateTestState.result" class="diag-result ok">
+              成功：{{ translateTestState.result }}（{{ translateTestState.duration }}ms）
+            </div>
+            <div v-else-if="translateTestState.error" class="diag-result err">
+              {{ translateTestState.error }}
+            </div>
+          </div>
+
+          <!-- 开启指引 -->
+          <div v-if="aiStatus.prompt !== 'available'" class="diag-tip">
+            <b>如何开启端侧模型：</b><br>
+            · Chrome 138+：<code>chrome://flags/#prompt-api-for-gemini-nano</code> 设为 Enabled<br>
+            · 也可访问 <code>chrome://on-device-internals</code> 查看模型下载进度<br>
+            · 首次使用需要下载模型，请保持网络畅通并稍等几分钟
+          </div>
+
+          <div style="display:flex;gap:8px;">
+            <button class="diag-mini-btn" style="flex:1;justify-content:center;" :disabled="aiStatus.prompt === 'checking'" @click="checkSystemAI()">
+              <span v-if="aiStatus.prompt === 'checking'">检测中…</span>
+              <span v-else>🔄 重新检测</span>
+            </button>
+            <button class="diag-mini-btn" style="flex:1;justify-content:center;" @click="copyConsoleScript()">
+              <span v-if="copiedScript">✅ 已复制自测脚本</span>
+              <span v-else>📋 复制 F12 自测脚本</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 模型参数设置弹窗 -->
     <div v-if="settingsModalOpen" class="modal-backdrop" @click.self="settingsModalOpen = false">
       <div class="modal-content glass-card">
         <div style="padding:18px 24px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;">
