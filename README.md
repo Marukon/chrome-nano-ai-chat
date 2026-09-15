@@ -51,6 +51,30 @@ npx serve .
 
 ---
 
+## 🔨 源码开发与防 CDN 缓存构建
+
+EdgeOne 等现代 CDN 通常对静态资源（`.js` / `.css`）配置了较长缓存周期（例如 30 天 `max-age=2592000`）。为了确保每次发布更新后 CDN 边缘节点能够**立即分发最新代码**且不受旧缓存影响，本项目提供了全自动随机哈希构建机制：
+
+- **基准源码**：存放于 `src/` 目录中（`src/index.html`、`src/css/style.css`、`src/js/*.js`）；
+- **执行构建**：
+  ```bash
+  # 使用 Python (推荐，跨平台且零第三方依赖)
+  python build.py
+
+  # 或使用 Node.js
+  node scripts/build.js
+  # 或
+  npm run build
+  ```
+- **自动处理**：
+  1. 清理上一次构建的旧哈希文件；
+  2. 生成全新的 8 位随机哈希版本号；
+  3. 将业务 CSS/JS 打包为带哈希的独立文件名（如 `style.<hash>.css`、`app.<hash>.js`）；
+  4. 自动解析并重写 `app.<hash>.js` 内部的 ES 模块依赖导入路径；
+  5. 自动同步更新根目录 `index.html` 外部引用路径与 `assets/manifest.json` 版本清单。
+
+---
+
 ## 🛠️ Chrome 浏览器前置开启说明
 
 本项目运行依赖 Google Chrome 内置的端侧模型：

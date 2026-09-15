@@ -4,7 +4,9 @@
   "private": true,
   "description": "A modern on-device AI workspace powered by Chrome Built-in Gemini Nano",
   "scripts": {
-    "dev": "npx serve .",
+    "build": "python build.py",
+    "build:node": "node scripts/build.js",
+    "dev": "python build.py && npx serve .",
     "start": "npx serve ."
   },
   "keywords": [
