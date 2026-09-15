@@ -184,26 +184,24 @@ createApp({
     // 等待中的任务 { mode, run }
     const studioQueue = ref([])
 
-    // 所有工具面板的运行标记，集中重置用
-    function resetStudioFlags() {
-      isSummarizing.value = false
-      isExtracting.value = false
-      isOutlining.value = false
-      isPolishing.value = false
-      isRewriteSrcRunning.value = false
-      isWashing.value = false
-      isDictRunning.value = false
-      isRewriting.value = false
-      isWriting.value = false
-      isRebutting.value = false
-      isProofreading.value = false
-      isTranslating.value = false
-      isCodeReviewing.value = false
-      isScripting.value = false
+    /**
+     * 判断异常是否为「用户主动中断」。
+     * 中断时不应把报错信息写入输出区，否则会覆盖已经生成的部分内容。
+     */
+    function isAbortError(err, signal) {
+      if (signal?.aborted) return true
+      const name = err?.name || ''
+      const msg = String(err?.message || '')
+      return name === 'AbortError' || /abort/i.test(msg)
     }
 
     /**
      * 提交一个工具任务：空闲则立即执行，忙则排队（不打断正在跑的任务）
+     *
+     * 注意：runner 内部读取的是响应式状态，因此排队任务在真正执行时才取输入值。
+     * 为保持语义清晰，调用方若使用文本输入，应在入队前先做快照
+     * （见 runSummarizer 等函数的 input/options 常量）。
+     *
      * @param {string} mode 模式 id，用于队列展示
      * @param {Function} runner 实际执行体，接收 AbortSignal
      * @returns {Promise} 任务完成（或排队后完成）的 Promise
@@ -214,7 +212,8 @@ createApp({
         if (studioAbort.value) {
           // 已有任务在跑 → 排队等待，不中断前一个
           studioQueue.value = [...studioQueue.value, task]
-          showToast(`已加入队列（前面还有 ${studioQueue.value.length} 个任务）`)
+          const label = (MODE_META[mode] || {}).label || mode
+          showToast(`「${label}」已加入队列（前面还有 ${studioQueue.value.length} 个任务）`)
           return
         }
         runStudioTask(task)
@@ -239,16 +238,18 @@ createApp({
       }
     }
 
-    // 停止：中断正在运行的任务并清空队列（保留已输出的部分内容）
+    // 停止：只中断当前正在运行的任务，队列继续按原计划往下走
+    // （保留已输出的部分内容；被中断的 runner 会走自己的 catch/finally 收尾）
     function stopStudio() {
+      const pending = studioQueue.value.length
       if (studioAbort.value) {
         try { studioAbort.value.abort() } catch (e) {}
-        studioAbort.value = null
       }
-      const dropped = studioQueue.value.length
-      studioQueue.value = []
-      resetStudioFlags()
-      if (dropped) showToast(`已停止生成，并取消 ${dropped} 个排队任务`)
+      showToast(
+        pending
+          ? `已停止当前任务，队列中还有 ${pending} 个任务将继续执行`
+          : '已停止生成'
+      )
     }
 
     // Markdown 解析与 LaTeX 公式渲染器
@@ -701,29 +702,28 @@ createApp({
     // 运行 Summarizer 模式
     async function runSummarizer() {
       if (!summarizeInput.value.trim() || isSummarizing.value) return
+      // 入队即快照：排队等待期间用户可能修改输入，任务应按提交时的内容执行
+      const input = summarizeInput.value
+      const options = { type: summarizeType.value, length: summarizeLength.value, format: summarizeFormat.value }
       await enqueueStudioTask('summarizer', async (signal) => {
         isSummarizing.value = true
         summarizeOutput.value = ''
         const record = ensureStudioSession('summarizer')
         try {
           await ChromeAIService.summarize(
-            summarizeInput.value,
-            {
-              type: summarizeType.value,
-              length: summarizeLength.value,
-              format: summarizeFormat.value,
-            },
+            input,
+            options,
             (chunk) => {
               summarizeOutput.value = chunk
             },
             signal
           )
         } catch (e) {
-          summarizeOutput.value = `> ⚠️ **摘要失败**：${e.message}`
+          if (!isAbortError(e, signal)) summarizeOutput.value = `> ⚠️ **摘要失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
-            input: summarizeInput.value,
-            options: { type: summarizeType.value, length: summarizeLength.value },
+            input,
+            options: { type: options.type, length: options.length },
             output: summarizeOutput.value,
           })
           isSummarizing.value = false
@@ -734,18 +734,20 @@ createApp({
     // 运行 Extract 结构化萃取（面向常规文章，不限学术）
     async function runExtract() {
       if (!extractInput.value.trim() || isExtracting.value) return
+      const input = extractInput.value
+      const style = extractStyle.value
       await enqueueStudioTask('extract', async (signal) => {
         isExtracting.value = true
         extractOutput.value = ''
         const record = ensureStudioSession('extract')
-        const styleText = extractStyle.value === 'table'
+        const styleText = style === 'table'
           ? '请以 Markdown 表格输出，表头自行根据内容确定'
           : '请以多级要点清单输出'
         const prompt = `请将以下文章整理为结构化信息。${styleText}。\n\n` +
           `需要覆盖这些维度（原文没有的写「未提及」，不要编造）：\n` +
           `- 主题与核心观点\n- 关键信息与要点\n- 涉及的人物/机构/时间/地点\n` +
           `- 给出的数据、结论或建议\n- 需要注意的事项\n\n` +
-          `【待整理文章】：\n${extractInput.value}`
+          `【待整理文章】：\n${input}`
 
         try {
           const session = await ChromeAIService.createChatSession({
@@ -760,11 +762,11 @@ createApp({
             signal
           )
         } catch (e) {
-          extractOutput.value = `> ⚠️ **整理失败**：${e.message}`
+          if (!isAbortError(e, signal)) extractOutput.value = `> ⚠️ **整理失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
-            input: extractInput.value,
-            options: { style: extractStyle.value },
+            input,
+            options: { style },
             output: extractOutput.value,
           })
           isExtracting.value = false
@@ -801,7 +803,7 @@ createApp({
             signal
           )
         } catch (e) {
-          polishOutput.value = `> ⚠️ **润色失败**：${e.message}`
+          if (!isAbortError(e, signal)) polishOutput.value = `> ⚠️ **润色失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             input: polishInput.value,
@@ -848,7 +850,7 @@ createApp({
             signal
           )
         } catch (e) {
-          outlineOutput.value = `> ⚠️ **大纲生成失败**：${e.message}`
+          if (!isAbortError(e, signal)) outlineOutput.value = `> ⚠️ **大纲生成失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             input: outlineTopic.value,
@@ -895,7 +897,7 @@ createApp({
             signal
           )
         } catch (e) {
-          rewriteSrcOutput.value = `> ⚠️ **改写降重失败**：${e.message}`
+          if (!isAbortError(e, signal)) rewriteSrcOutput.value = `> ⚠️ **改写降重失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             input: rewriteSrcInput.value,
@@ -942,7 +944,7 @@ createApp({
             signal
           )
         } catch (e) {
-          washOutput.value = `> ⚠️ **洗稿失败**：${e.message}`
+          if (!isAbortError(e, signal)) washOutput.value = `> ⚠️ **洗稿失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             input: washInput.value,
@@ -1020,7 +1022,7 @@ createApp({
             signal
           )
         } catch (e) {
-          dictOutput.value = `> ⚠️ **查询失败**：${e.message}`
+          if (!isAbortError(e, signal)) dictOutput.value = `> ⚠️ **查询失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             input: word,
@@ -1073,7 +1075,7 @@ createApp({
             signal
           )
         } catch (e) {
-          rewriteOutput.value = `> ⚠️ **润色失败**：${e.message}`
+          if (!isAbortError(e, signal)) rewriteOutput.value = `> ⚠️ **润色失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             input: rewriteInput.value,
@@ -1108,7 +1110,7 @@ createApp({
             signal
           )
         } catch (e) {
-          writeOutput.value = `> ⚠️ **起草失败**：${e.message}`
+          if (!isAbortError(e, signal)) writeOutput.value = `> ⚠️ **起草失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             prompt: writePrompt.value,
@@ -1153,7 +1155,7 @@ createApp({
             signal
           )
         } catch (e) {
-          rebuttalOutput.value = `> ⚠️ **生成答辩失败**：${e.message}`
+          if (!isAbortError(e, signal)) rebuttalOutput.value = `> ⚠️ **生成答辩失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             comment: rebuttalComment.value,
@@ -1198,7 +1200,7 @@ createApp({
             signal
           )
         } catch (e) {
-          proofreadOutput.value = `> ⚠️ **纠错失败**：${e.message}`
+          if (!isAbortError(e, signal)) proofreadOutput.value = `> ⚠️ **纠错失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             input: proofreadInput.value,
@@ -1257,7 +1259,7 @@ createApp({
             signal
           )
         } catch (e) {
-          codeOutput.value = `> ⚠️ **代码审查失败**：${e.message}`
+          if (!isAbortError(e, signal)) codeOutput.value = `> ⚠️ **代码审查失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             input: codeInput.value,
@@ -1289,7 +1291,7 @@ createApp({
             signal
           )
         } catch (e) {
-          translateOutput.value = `> ⚠️ **翻译失败**：${e.message}`
+          if (!isAbortError(e, signal)) translateOutput.value = `> ⚠️ **翻译失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             input: translateInput.value,
@@ -1334,7 +1336,7 @@ createApp({
             signal
           )
         } catch (e) {
-          scriptOutput.value = `> ⚠️ **脚本生成失败**：${e.message}`
+          if (!isAbortError(e, signal)) scriptOutput.value = `> ⚠️ **脚本生成失败**：${e.message}`
         } finally {
           persistStudioSession(record, {
             input: scriptRequirement.value,
