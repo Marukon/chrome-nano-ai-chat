@@ -381,6 +381,40 @@ createApp({
       }
     }
 
+    // 端侧翻译实测状态
+    const translateTestState = ref({
+      running: false,
+      result: '',
+      duration: 0,
+      error: ''
+    })
+
+    async function runTranslateTest() {
+      translateTestState.value.running = true
+      translateTestState.value.error = ''
+      translateTestState.value.result = ''
+      try {
+        const res = await ChromeAIService.testTranslate()
+        translateTestState.value.result = res.result
+        translateTestState.value.duration = res.duration
+      } catch (err) {
+        translateTestState.value.error = err.message || '测试失败'
+      } finally {
+        translateTestState.value.running = false
+      }
+    }
+
+    // 复制控制台检测脚本
+    const copiedScript = ref(false)
+    async function copyConsoleScript() {
+      const script = "console.log({ LanguageModel: typeof window.LanguageModel, ai: typeof window.ai, Translator: typeof window.Translator });"
+      await navigator.clipboard.writeText(script)
+      copiedScript.value = true
+      setTimeout(() => {
+        copiedScript.value = false
+      }, 2500)
+    }
+
     // 初始化
     onMounted(() => {
       // 设置主题
@@ -412,6 +446,7 @@ createApp({
       ROLE_PRESETS,
       currentRole,
       aiStatus,
+      checkSystemAI,
       currentInput,
       isGenerating,
       chatContainerRef,
@@ -428,6 +463,11 @@ createApp({
       copyToClipboard,
       useQuickPrompt,
       exportSessionToMarkdown,
+      // Diagnostics
+      translateTestState,
+      runTranslateTest,
+      copiedScript,
+      copyConsoleScript,
       // Summarizer
       summarizeInput,
       summarizeOutput,

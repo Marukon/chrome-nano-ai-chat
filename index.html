@@ -100,12 +100,29 @@
         </div>
 
         <div class="nav-actions">
+          <!-- 端侧 AI 状态指示胶囊 -->
+          <button
+            class="status-pill"
+            :class="{
+              'ready': aiStatus.prompt === 'available',
+              'warn': aiStatus.prompt !== 'available' && (aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'),
+              'unavail': aiStatus.prompt !== 'available' && !(aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available')
+            }"
+            title="点击查看端侧模型诊断与开启指引"
+            @click="settingsModalOpen = true"
+          >
+            <span class="status-dot"></span>
+            <span v-if="aiStatus.prompt === 'available'">Gemini Nano 已就绪</span>
+            <span v-else-if="aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'">端侧翻译可用 / Nano待开启</span>
+            <span v-else>端侧模型待配置</span>
+          </button>
+
           <!-- 导出按钮 -->
           <button v-if="currentMode === 'chat' && activeSession" class="icon-button" title="导出当前会话为 Markdown" @click="exportSessionToMarkdown(activeSession)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           </button>
           <!-- 设置弹窗按钮 -->
-          <button class="icon-button" title="模型参数与说明" @click="settingsModalOpen = true">
+          <button class="icon-button" title="端侧诊断与参数设置" @click="settingsModalOpen = true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
           </button>
           <!-- 暗色/亮色切换 -->
@@ -125,6 +142,17 @@
             <p style="color:var(--text-secondary);font-size:0.95rem;max-width:480px;">
               由 Chrome 内置端侧大模型驱动。100% 本地运算，0ms 网络延迟，无需 API Key，绝对隐私安全。
             </p>
+
+            <!-- 环境诊断提示横幅 (若 Prompt 未就绪) -->
+            <div v-if="aiStatus.prompt !== 'available'" class="hero-alert-banner" @click="settingsModalOpen = true">
+              <span style="font-size:1.2rem;">💡</span>
+              <div style="text-align:left;flex:1;">
+                <div style="font-weight:600;font-size:0.88rem;">检测到端侧 Gemini Nano 待开启</div>
+                <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px;">
+                  当前浏览器已支持端侧翻译，但对话模型 (Prompt API) 需要在 Chrome Dev/Canary 启用。点击查看环境诊断与开启教程 &gt;
+                </div>
+              </div>
+            </div>
 
             <div class="quick-prompts">
               <div class="glass-card quick-prompt-card" @click="useQuickPrompt('帮我审阅这段学术论文摘要的逻辑严密性并提出批评：\n')">
@@ -376,35 +404,171 @@
 
     <!-- 设置与模型信息弹窗 -->
     <div v-if="settingsModalOpen" class="modal-backdrop" @click.self="settingsModalOpen = false">
-      <div class="modal-content glass-card" style="padding:24px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
-          <h3 style="font-size:1.1rem;font-weight:700;">⚙️ 模型参数与端侧状态</h3>
+      <div class="modal-content glass-card">
+        <div style="padding:18px 24px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;">
+          <h3 style="font-size:1.1rem;font-weight:700;display:flex;align-items:center;gap:8px;">
+            <span>⚙️</span>
+            <span>端侧大模型状态与诊断</span>
+          </h3>
           <button class="icon-button" style="width:28px;height:28px;" @click="settingsModalOpen = false">✕</button>
         </div>
 
-        <div style="display:flex;flex-direction:column;gap:16px;">
-          <div>
-            <div style="display:flex;justify-content:space-between;font-size:0.88rem;margin-bottom:6px;">
-              <span>随机度 (Temperature)</span>
-              <span>{{ settings.temperature }}</span>
+        <div class="modal-body-scroll" style="display:flex;flex-direction:column;gap:20px;">
+          <!-- 1. 实时端侧 API 检测矩阵 -->
+          <div style="background:rgba(125,125,125,0.05);border:1px solid var(--border-color);border-radius:14px;padding:14px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+              <span style="font-weight:700;font-size:0.9rem;display:flex;align-items:center;gap:6px;">
+                <span>🔍</span>
+                <span>当前浏览器端侧 API 检测报告</span>
+              </span>
+              <button class="btn-new-chat" style="margin:0;padding:4px 10px;font-size:0.75rem;height:auto;" @click="checkSystemAI()">
+                🔄 刷新检测
+              </button>
             </div>
-            <input v-model.number="settings.temperature" type="range" min="0" max="1" step="0.05" style="width:100%;cursor:pointer;">
+
+            <table class="diag-table">
+              <thead>
+                <tr>
+                  <th>API 接口名称</th>
+                  <th>标准层级</th>
+                  <th>探测状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><b>Translator</b> (翻译 API)</td>
+                  <td>W3C 独立小模型</td>
+                  <td>
+                    <span v-if="aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'" style="color:#16a34a;font-weight:600;">✅ 已就绪 (可用)</span>
+                    <span v-else style="color:var(--text-muted);">❌ 未支持</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><b>LanguageDetector</b> (语种识别)</td>
+                  <td>W3C 规范</td>
+                  <td>
+                    <span v-if="aiStatus.detectedAPIs?.LanguageDetector || aiStatus.detector === 'available'" style="color:#16a34a;font-weight:600;">✅ 已就绪</span>
+                    <span v-else style="color:var(--text-muted);">❌ 未支持</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><b>LanguageModel</b> (Prompt API)</td>
+                  <td>W3C 标准全局对象</td>
+                  <td>
+                    <span v-if="aiStatus.detectedAPIs?.LanguageModel || aiStatus.prompt === 'available'" style="color:#16a34a;font-weight:600;">✅ 已就绪</span>
+                    <span v-else style="color:#d97706;font-weight:600;">⚠️ 未开启 (Gemini Nano)</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><b>window.ai</b> (Prompt API)</td>
+                  <td>早期 Chromium 试验命名空间</td>
+                  <td>
+                    <span v-if="aiStatus.detectedAPIs?.windowAi" style="color:#16a34a;font-weight:600;">✅ 已支持</span>
+                    <span v-else style="color:var(--text-muted);">未发现</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><b>Summarizer / Rewriter / Writer</b></td>
+                  <td>高级文本生成与润色 API</td>
+                  <td>
+                    <span v-if="aiStatus.detectedAPIs?.Summarizer || aiStatus.detectedAPIs?.Rewriter || aiStatus.detectedAPIs?.Writer" style="color:#16a34a;font-weight:600;">✅ 部分已支持</span>
+                    <span v-else style="color:var(--text-muted);">未开启</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <!-- 端侧翻译实测工具 (证明端侧 AI 算力正常) -->
+            <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border-color);">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div style="font-size:0.82rem;color:var(--text-secondary);">
+                  💡 <b>验证浏览器端侧能力：</b>现场测试本地原生端侧翻译
+                </div>
+                <button
+                  class="btn-new-chat"
+                  style="margin:0;padding:5px 12px;font-size:0.8rem;height:auto;background:var(--accent-color);color:#fff;"
+                  :disabled="translateTestState.running || !(aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available')"
+                  @click="runTranslateTest()"
+                >
+                  <span v-if="translateTestState.running">⏳ 推理中...</span>
+                  <span v-else>⚡ 运行端侧翻译测试</span>
+                </button>
+              </div>
+
+              <div v-if="translateTestState.result" style="margin-top:8px;padding:8px 12px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:8px;font-size:0.82rem;color:var(--text-primary);">
+                <b>测试成功：</b>"Hello world! Built-in on-device AI is working." ➔ <b>{{ translateTestState.result }}</b> (端侧推理耗时: {{ translateTestState.duration }}ms)
+              </div>
+              <div v-else-if="translateTestState.error" style="margin-top:8px;padding:8px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:8px;font-size:0.82rem;color:#ef4444;">
+                {{ translateTestState.error }}
+              </div>
+            </div>
           </div>
 
-          <div>
-            <div style="display:flex;justify-content:space-between;font-size:0.88rem;margin-bottom:6px;">
-              <span>Top-K 采样</span>
-              <span>{{ settings.topK }}</span>
+          <!-- 2. 核心原理与疑惑解答 -->
+          <div style="padding:14px;border-radius:14px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18);font-size:0.82rem;line-height:1.6;">
+            <div style="font-weight:700;margin-bottom:6px;color:var(--text-primary);font-size:0.88rem;">
+              ❓ 为什么“翻译项目能用”，但“对话大模型不支持且 chrome://flags 找不到”？
             </div>
-            <input v-model.number="settings.topK" type="range" min="1" max="10" step="1" style="width:100%;cursor:pointer;">
+            <ul style="padding-left:18px;margin-bottom:4px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary);">
+              <li>
+                <b>模型体积极小 vs 庞大 1.5GB LLM：</b>翻译（<code>Translator API</code>）是数十兆的专用微型模型，Google 已在普通 Chrome（包括正式版 Stable）逐步默认放开，普通轻薄本均可轻松运行；而 Gemini Nano 是完整的 <b>1.5GB ~ 3GB 通用大语言模型</b>，需要 GPU 显存与硬盘空间。
+              </li>
+              <li>
+                <b>Flags 官方隐藏机制：</b>Google 目前将 Gemini Nano Prompt API 部署在 <b>Chrome Dev 或 Canary</b> 开发者预览频道。在普通正式版 Chrome 中，<code>#prompt-api-for-gemini-nano</code> 被官方故意隐藏，因此搜索不到此 flag。
+              </li>
+            </ul>
           </div>
 
-          <div style="padding:12px;border-radius:12px;background:rgba(125,125,125,0.06);font-size:0.8rem;color:var(--text-secondary);">
-            <div style="font-weight:600;margin-bottom:6px;color:var(--text-primary);">💡 Chrome 开启指南：</div>
-            <p>1. 需要 Google Chrome v138 或更高版本</p>
-            <p>2. 在地址栏打开 <code>chrome://flags/#optimization-guide-on-device-model</code> 设为 <b>Enabled BypassPerfRequirement</b></p>
-            <p>3. 在地址栏打开 <code>chrome://flags/#prompt-api-for-gemini-nano</code> 设为 <b>Enabled</b></p>
-            <p>4. 在 <code>chrome://components</code> 点击 <b>Optimization Guide On Device Model</b> 检查模型下载状态</p>
+          <!-- 3. 开启 Gemini Nano 指南 -->
+          <div style="padding:14px;border-radius:14px;background:rgba(125,125,125,0.06);font-size:0.82rem;color:var(--text-secondary);line-height:1.6;">
+            <div style="font-weight:700;margin-bottom:8px;color:var(--text-primary);font-size:0.88rem;">🚀 开启 Gemini Nano 的标准步骤：</div>
+            <ol style="padding-left:18px;display:flex;flex-direction:column;gap:6px;">
+              <li>
+                下载安装 <b>Google Chrome Dev</b> 或 <b>Chrome Canary</b> 频道版本 (版本需 ≥ 138)；
+              </li>
+              <li>
+                在地址栏打开 <code>chrome://flags/#optimization-guide-on-device-model</code>，设为 <b>Enabled BypassPerfRequirement</b>；
+              </li>
+              <li>
+                在地址栏打开 <code>chrome://flags/#prompt-api-for-gemini-nano</code>，设为 <b>Enabled</b>；
+              </li>
+              <li>
+                重启浏览器后打开 <code>chrome://components</code>，找到 <b>Optimization Guide On Device Model</b>，点击 <b>Check for update</b>，确保模型文件 (~1.5GB) 下载完毕；
+              </li>
+              <li>
+                <b>硬件检查：</b>系统盘（C盘）建议至少保留 22GB 剩余可用空间，且具备支持 WebGPU/DirectML 的显卡。
+              </li>
+            </ol>
+
+            <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;background:rgba(125,125,125,0.1);padding:8px 12px;border-radius:8px;">
+              <span style="font-family:var(--font-mono);font-size:0.76rem;">控制台验证代码 (F12)</span>
+              <button class="btn-new-chat" style="margin:0;padding:4px 10px;font-size:0.75rem;height:auto;" @click="copyConsoleScript()">
+                <span v-if="copiedScript">✅ 已复制到剪贴板</span>
+                <span v-else>📋 复制自测脚本</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 4. 模型生成参数调整 -->
+          <div>
+            <div style="font-weight:700;font-size:0.88rem;margin-bottom:12px;">🎛️ 对话采样参数设置</div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:0.84rem;margin-bottom:6px;">
+                  <span>随机度 (Temperature)</span>
+                  <span style="font-family:var(--font-mono);font-weight:600;">{{ settings.temperature }}</span>
+                </div>
+                <input v-model.number="settings.temperature" type="range" min="0" max="1" step="0.05" style="width:100%;cursor:pointer;">
+              </div>
+
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:0.84rem;margin-bottom:6px;">
+                  <span>Top-K 采样</span>
+                  <span style="font-family:var(--font-mono);font-weight:600;">{{ settings.topK }}</span>
+                </div>
+                <input v-model.number="settings.topK" type="range" min="1" max="10" step="1" style="width:100%;cursor:pointer;">
+              </div>
+            </div>
           </div>
         </div>
       </div>
