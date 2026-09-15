@@ -123,6 +123,11 @@
         </div>
 
         <div class="nav-actions">
+          <!-- 导出按钮（置于状态检测左侧） -->
+          <button v-if="activeSession" class="icon-button" title="导出当前会话 / 工具结果为 Markdown" @click="exportSessionToMarkdown(activeSession)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          </button>
+
           <!-- 端侧 AI 状态指示胶囊：检测中不写文字，避免"待配置 → ✓"的跳变闪烁 -->
           <button
             class="status-pill"
@@ -132,8 +137,8 @@
               'warn': aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && (aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'),
               'unavail': aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && !(aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available')
             }"
-            :title="aiStatus.prompt === 'checking' ? '正在检测端侧模型…' : '点击查看端侧模型诊断与开启指引'"
-            @click="settingsModalOpen = true"
+            :title="aiStatus.prompt === 'checking' ? '正在检测端侧模型…' : '点击查看端侧模型状态检测与开启指引'"
+            @click="diagModalOpen = true"
           >
             <span class="status-dot"></span>
             <span v-if="aiStatus.prompt === 'checking'" class="status-skeleton"></span>
@@ -142,12 +147,8 @@
             <span v-else>待配置</span>
           </button>
 
-          <!-- 导出按钮 -->
-          <button v-if="activeSession" class="icon-button" title="导出当前会话 / 工具结果为 Markdown" @click="exportSessionToMarkdown(activeSession)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          </button>
-          <!-- 设置弹窗按钮 -->
-          <button class="icon-button" title="端侧诊断与参数设置" @click="settingsModalOpen = true">
+          <!-- 参数设置弹窗按钮 -->
+          <button class="icon-button" title="模型参数设置" @click="settingsModalOpen = true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
           </button>
           <!-- 暗色/亮色切换 -->
@@ -169,7 +170,7 @@
             </p>
 
             <!-- 环境诊断提示横幅（检测完成后、且模型确实未就绪才出现，避免闪现） -->
-            <div v-if="aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && aiStatus.prompt !== 'downloadable'" class="hero-alert-banner" @click="settingsModalOpen = true">
+            <div v-if="aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && aiStatus.prompt !== 'downloadable'" class="hero-alert-banner" @click="diagModalOpen = true">
               <span style="font-size:1.2rem;">💡</span>
               <div style="text-align:left;flex:1;">
                 <div style="font-weight:600;font-size:0.88rem;">检测到端侧对话大模型待开启</div>
@@ -229,7 +230,7 @@
               ref="inputRef"
               v-model="currentInput"
               class="chat-textarea"
-              placeholder="输入你的问题或粘贴学术论文段落... (Enter 发送，Shift+Enter 换行)"
+              placeholder="输入你的问题，或直接粘贴文章段落... (Enter 发送，Shift+Enter 换行)"
               rows="1"
               @input="autoGrowInput()"
               @keydown.enter.exact="handleEnterKey($event)"
@@ -253,11 +254,11 @@
         </div>
       </section>
 
-      <!-- 模式 2：论文摘要 (Summarizer API) -->
+      <!-- 模式 2：文章摘要 (Summarizer API，中英文均可用) -->
       <section v-if="currentMode === 'summarizer'" class="studio-container">
         <div class="glass-card studio-card">
           <div class="studio-card-header">
-            <span style="font-weight:600;font-size:0.95rem;">📄 输入长篇英文文献 / 文本</span>
+            <span style="font-weight:600;font-size:0.95rem;">📄 输入长文 / 文章 / 报道</span>
             <div style="display:flex;gap:8px;">
               <select v-model="summarizeType" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
                 <option value="key-points">创新要点 (Key-points)</option>
@@ -276,7 +277,7 @@
             <textarea
               v-model="summarizeInput"
               class="studio-textarea"
-              placeholder="在此粘贴大段英文文献、Abstract 或会议论文正文..."
+              placeholder="在此粘贴需要摘要的文章、报道、报告或长文（中文英文均可）..."
             ></textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:12px;">
               <button v-if="isSummarizing" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
@@ -292,7 +293,7 @@
 
         <div class="glass-card studio-card">
           <div class="studio-card-header">
-            <span style="font-weight:600;font-size:0.95rem;">💡 结构化摘要结果</span>
+            <span style="font-weight:600;font-size:0.95rem;">💡 摘要结果</span>
             <button v-if="summarizeOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(summarizeOutput)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
@@ -300,7 +301,108 @@
           <div class="studio-card-body">
             <div v-if="summarizeOutput" class="markdown-body" v-html="renderMarkdown(summarizeOutput)"></div>
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
-              左侧输入文献后点击开始，摘要将实时在此流式呈现
+              左侧输入长文后点击开始，摘要将实时在此流式呈现
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 模式：大纲生成 (Outline) -->
+      <section v-if="currentMode === 'outline'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🧭 写什么主题</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <select v-model="outlineType" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="article">通俗文章</option>
+                <option value="report">工作汇报</option>
+                <option value="speech">演讲稿</option>
+                <option value="social">社交媒体长文</option>
+              </select>
+              <select v-model="outlineDepth" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="brief">精简大纲</option>
+                <option value="medium">标准大纲</option>
+                <option value="detailed">详细大纲</option>
+              </select>
+            </div>
+          </div>
+          <div class="studio-card-body" style="gap:12px;">
+            <input
+              v-model="outlineTopic"
+              class="glass"
+              style="padding:10px 14px;border-radius:10px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);font-size:0.9rem;"
+              placeholder="主题（例如：写给新入职同事的办公工具入门指南 / 我们为什么要支持远程办公）"
+            />
+            <div style="display:flex;justify-content:flex-end;">
+              <button v-if="isOutlining" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!outlineTopic.trim()" @click="runOutline()">
+                <span>🚀 生成大纲</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🗂️ 写作大纲</span>
+            <button v-if="outlineOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(outlineOutput)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="outlineOutput" class="markdown-body" v-html="renderMarkdown(outlineOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              拟定好的大纲将在此呈现，可继续用「文案起草」按大纲成文
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 模式：通用润色 (Polish) -->
+      <section v-if="currentMode === 'polish'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🪄 输入需要润色的文字</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <select v-model="polishStrength" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="light">轻度（只改错）</option>
+                <option value="medium">中度（更通顺）</option>
+                <option value="strong">深度（重写句式）</option>
+              </select>
+            </div>
+          </div>
+          <div class="studio-card-body">
+            <textarea
+              v-model="polishInput"
+              class="studio-textarea"
+              placeholder="粘贴需要润色的文字（朋友圈、通知、文章段落、工作邮件均可），端侧模型会在保留原意的前提下让表达更通顺得体..."
+            ></textarea>
+            <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+              <button v-if="isPolishing" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!polishInput.trim()" @click="runPolish()">
+                <span>🚀 开始润色</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">✨ 润色结果</span>
+            <button v-if="polishOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(polishOutput)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="polishOutput" class="markdown-body" v-html="renderMarkdown(polishOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              润色后的文字将在此呈现
             </div>
           </div>
         </div>
@@ -310,7 +412,7 @@
       <section v-if="currentMode === 'extract'" class="studio-container">
         <div class="glass-card studio-card">
           <div class="studio-card-header">
-            <span style="font-weight:600;font-size:0.95rem;">🧾 输入长篇文献 / 会议纪要</span>
+            <span style="font-weight:600;font-size:0.95rem;">🧾 输入文章 / 报告 / 会议记录</span>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               <select v-model="extractStyle" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
                 <option value="table">Markdown 表格</option>
@@ -322,7 +424,7 @@
             <textarea
               v-model="extractInput"
               class="studio-textarea"
-              placeholder="在此粘贴长篇文献、技术报告或会议讨论记录，端侧模型将萃取为结构化信息..."
+              placeholder="在此粘贴文章、公众号长文、技术报告或会议记录，端侧模型将整理为结构化信息..."
             ></textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:12px;">
               <button v-if="isExtracting" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
@@ -338,7 +440,7 @@
 
         <div class="glass-card studio-card">
           <div class="studio-card-header">
-            <span style="font-weight:600;font-size:0.95rem;">📊 结构化萃取结果</span>
+            <span style="font-weight:600;font-size:0.95rem;">📊 结构化整理结果</span>
             <button v-if="extractOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(extractOutput)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
@@ -346,7 +448,7 @@
           <div class="studio-card-body">
             <div v-if="extractOutput" class="markdown-body" v-html="renderMarkdown(extractOutput)"></div>
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
-              萃取出的动机 / 方法 / 基线 / 结果 / 局限将在此呈现
+              整理出的主题 / 要点 / 人物时间 / 数据结论将在此呈现
             </div>
           </div>
         </div>
@@ -520,23 +622,17 @@
         </div>
       </section>
 
-      <!-- 模式 6：语法与深度纠错 (Proofread Studio) -->
+      <!-- 模式 6：文字纠错 (Proofread) -->
       <section v-if="currentMode === 'proofread'" class="studio-container">
         <div class="glass-card studio-card">
           <div class="studio-card-header">
-            <span style="font-weight:600;font-size:0.95rem;">🔍 输入待查错论文段落</span>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <select v-model="proofreadStandard" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
-                <option value="strict">顶级国际期刊出版级 (Strict Journal Standard)</option>
-                <option value="clarity">学术清晰度与通畅 (Clarity & Flow)</option>
-              </select>
-            </div>
+            <span style="font-weight:600;font-size:0.95rem;">🔍 输入需要检查的文字</span>
           </div>
           <div class="studio-card-body">
             <textarea
               v-model="proofreadInput"
               class="studio-textarea"
-              placeholder="在此粘贴待检查的英文草稿段落，端侧大模型将逐句诊断语法毛病、冠词错误与中式搭配..."
+              placeholder="粘贴中文或英文文字，端侧模型将检查错别字、语法、标点与用词搭配，并给出修改对照..."
             ></textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:12px;">
               <button v-if="isProofreading" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
@@ -544,7 +640,7 @@
                 <span>停止生成</span>
               </button>
               <button v-else class="btn-new-chat" style="margin:0;" :disabled="!proofreadInput.trim()" @click="runProofread()">
-                <span>🚀 开始语法与句式查错</span>
+                <span>🚀 开始纠错</span>
               </button>
             </div>
           </div>
@@ -552,7 +648,7 @@
 
         <div class="glass-card studio-card">
           <div class="studio-card-header">
-            <span style="font-weight:600;font-size:0.95rem;">🎯 纠错建议与修改对照表</span>
+            <span style="font-weight:600;font-size:0.95rem;">✅ 修正结果与修改清单</span>
             <button v-if="proofreadOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(proofreadOutput)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
@@ -560,27 +656,31 @@
           <div class="studio-card-body">
             <div v-if="proofreadOutput" class="markdown-body" v-html="renderMarkdown(proofreadOutput)"></div>
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
-              纠错诊断与对照修改建议将在此呈现
+              修正后的全文与逐条修改清单将在此呈现
             </div>
           </div>
         </div>
       </section>
 
-      <!-- 模式 8：学术翻译 (Translate) -->
+      <!-- 模式 8：中英互译 (Translate) -->
       <section v-if="currentMode === 'translate'" class="studio-container">
         <div class="glass-card studio-card">
           <div class="studio-card-header">
             <span style="font-weight:600;font-size:0.95rem;">🌐 输入待翻译文本</span>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <span class="lang-chip">输入</span>
               <select v-model="translateSource" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
-                <option value="en">英文</option>
                 <option value="zh">中文</option>
+                <option value="en">英文</option>
                 <option value="ja">日文</option>
               </select>
-              <span style="color:var(--text-muted);font-size:0.85rem;">➜</span>
+              <button class="icon-button" style="width:28px;height:28px;" title="互换输入 / 输出语言" @click="swapTranslateLang()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+              </button>
+              <span class="lang-chip">输出</span>
               <select v-model="translateTarget" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
-                <option value="zh">中文</option>
                 <option value="en">英文</option>
+                <option value="zh">中文</option>
                 <option value="ja">日文</option>
               </select>
             </div>
@@ -589,7 +689,7 @@
             <textarea
               v-model="translateInput"
               class="studio-textarea"
-              placeholder="在此粘贴待翻译的学术段落。优先调用浏览器内置的端侧 Translator API（专用小模型），不支持时自动回退到通用对话模型..."
+              placeholder="粘贴中文或英文内容即可互相翻译（也可切换日文）。优先调用浏览器内置的端侧 Translator API（专用小模型），不支持时自动回退到通用对话模型..."
             ></textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:12px;">
               <button v-if="isTranslating" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
@@ -676,12 +776,17 @@
         <div class="glass-card studio-card">
           <div class="studio-card-header">
             <span style="font-weight:600;font-size:0.95rem;">🧩 描述你要的脚本</span>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
               <select v-model="scriptType" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
                 <option value="bash">Bash (Linux / macOS)</option>
                 <option value="bat">BAT 批处理 (Windows)</option>
                 <option value="powershell">PowerShell (Windows)</option>
               </select>
+              <label class="switch-label" title="脚本正文中不生成任何注释">
+                <input v-model="scriptNoComment" type="checkbox" class="switch-input">
+                <span class="switch-track"></span>
+                <span>不要注释</span>
+              </label>
             </div>
           </div>
           <div class="studio-card-body">
@@ -764,15 +869,70 @@
       </div>
     </div>
 
-    <!-- 设置与模型信息弹窗 -->
+    <!-- 模型参数设置弹窗（与状态检测分离） -->
     <div v-if="settingsModalOpen" class="modal-backdrop" @click.self="settingsModalOpen = false">
       <div class="modal-content glass-card">
         <div style="padding:18px 24px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;">
           <h3 style="font-size:1.1rem;font-weight:700;display:flex;align-items:center;gap:8px;">
             <span>⚙️</span>
-            <span>端侧大模型状态检测</span>
+            <span>模型参数设置</span>
           </h3>
           <button class="icon-button" style="width:28px;height:28px;" @click="settingsModalOpen = false">✕</button>
+        </div>
+
+        <div class="modal-body-scroll" style="display:flex;flex-direction:column;gap:20px;">
+          <!-- 采样参数 -->
+          <div>
+            <div style="font-weight:700;font-size:0.88rem;margin-bottom:12px;">🎛️ 对话采样参数</div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:0.84rem;margin-bottom:6px;">
+                  <span>随机度 (Temperature)</span>
+                  <span style="font-family:var(--font-mono);font-weight:600;">{{ settings.temperature }}</span>
+                </div>
+                <input v-model.number="settings.temperature" type="range" min="0" max="1" step="0.05" style="width:100%;cursor:pointer;">
+                <div style="font-size:0.74rem;color:var(--text-muted);margin-top:4px;">数值越低回答越稳定保守，越高越有创造性</div>
+              </div>
+
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:0.84rem;margin-bottom:6px;">
+                  <span>Top-K 采样</span>
+                  <span style="font-family:var(--font-mono);font-weight:600;">{{ settings.topK }}</span>
+                </div>
+                <input v-model.number="settings.topK" type="range" min="1" max="10" step="1" style="width:100%;cursor:pointer;">
+                <div style="font-size:0.74rem;color:var(--text-muted);margin-top:4px;">每次只从概率最高的 K 个候选词中挑选</div>
+              </div>
+            </div>
+            <div style="font-size:0.76rem;color:var(--text-muted);margin-top:10px;padding:8px 10px;background:rgba(125,125,125,0.06);border-radius:8px;">
+              💡 参数会自动保存，并应用于<b>之后新建的对话</b>（端侧会话创建后参数不可动态修改）。
+            </div>
+          </div>
+
+          <!-- 其他设置 -->
+          <div>
+            <div style="font-weight:700;font-size:0.88rem;margin-bottom:12px;">🎨 界面偏好</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:rgba(125,125,125,0.06);border-radius:10px;">
+              <span style="font-size:0.85rem;">主题模式</span>
+              <select v-model="settings.theme" class="glass" style="padding:5px 10px;border-radius:8px;font-size:0.82rem;color:var(--text-primary);background:transparent;">
+                <option value="auto">跟随系统</option>
+                <option value="light">亮色</option>
+                <option value="dark">暗色</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 端侧大模型状态检测弹窗 -->
+    <div v-if="diagModalOpen" class="modal-backdrop" @click.self="diagModalOpen = false">
+      <div class="modal-content glass-card">
+        <div style="padding:18px 24px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;">
+          <h3 style="font-size:1.1rem;font-weight:700;display:flex;align-items:center;gap:8px;">
+            <span>🔬</span>
+            <span>端侧大模型状态检测</span>
+          </h3>
+          <button class="icon-button" style="width:28px;height:28px;" @click="diagModalOpen = false">✕</button>
         </div>
 
         <div class="modal-body-scroll" style="display:flex;flex-direction:column;gap:20px;">
@@ -876,30 +1036,6 @@
             </div>
           </div>
 
-          <!-- 4. 模型生成参数调整 -->
-          <div>
-            <div style="font-weight:700;font-size:0.88rem;margin-bottom:12px;">🎛️ 对话采样参数设置</div>
-            <div style="display:flex;flex-direction:column;gap:14px;">
-              <div>
-                <div style="display:flex;justify-content:space-between;font-size:0.84rem;margin-bottom:6px;">
-                  <span>随机度 (Temperature)</span>
-                  <span style="font-family:var(--font-mono);font-weight:600;">{{ settings.temperature }}</span>
-                </div>
-                <input v-model.number="settings.temperature" type="range" min="0" max="1" step="0.05" style="width:100%;cursor:pointer;">
-              </div>
-
-              <div>
-                <div style="display:flex;justify-content:space-between;font-size:0.84rem;margin-bottom:6px;">
-                  <span>Top-K 采样</span>
-                  <span style="font-family:var(--font-mono);font-weight:600;">{{ settings.topK }}</span>
-                </div>
-                <input v-model.number="settings.topK" type="range" min="1" max="10" step="1" style="width:100%;cursor:pointer;">
-              </div>
-            </div>
-            <div style="font-size:0.76rem;color:var(--text-muted);margin-top:4px;">
-              参数会自动保存，并应用于之后新建的对话（会话创建后模型参数不可动态修改）。
-            </div>
-          </div>
         </div>
       </div>
     </div>

@@ -46,6 +46,7 @@ createApp({
     // 窄屏（≤1024px）侧边栏为抽屉模式，默认收起；宽屏默认展开
     const sidebarOpen = ref(window.innerWidth > 1024)
     const settingsModalOpen = ref(false)
+    const diagModalOpen = ref(false) // 端侧模型状态检测（与参数设置分离）
     const roleModalOpen = ref(false)
     const openMenu = ref('') // 顶栏二级菜单：当前展开的分组 id
 
@@ -79,11 +80,24 @@ createApp({
     const summarizeFormat = ref('markdown')
     const isSummarizing = ref(false)
 
-    // 结构化萃取 (Extract) 模式状态
+    // 结构化萃取 (Extract) 模式状态 —— 面向常规文章
     const extractInput = ref('')
     const extractStyle = ref('table') // 'table' | 'bullets'
     const extractOutput = ref('')
     const isExtracting = ref(false)
+
+    // 通用润色 (Polish)
+    const polishInput = ref('')
+    const polishStrength = ref('medium') // light | medium | strong
+    const polishOutput = ref('')
+    const isPolishing = ref(false)
+
+    // 大纲生成 (Outline)
+    const outlineTopic = ref('')
+    const outlineType = ref('article') // article | report | speech | social
+    const outlineDepth = ref('medium') // brief | medium | detailed
+    const outlineOutput = ref('')
+    const isOutlining = ref(false)
 
     // Rewriter 模式状态
     const rewriteInput = ref('')
@@ -122,6 +136,8 @@ createApp({
       }
       isSummarizing.value = false
       isExtracting.value = false
+      isOutlining.value = false
+      isPolishing.value = false
       isRewriting.value = false
       isWriting.value = false
       isRebutting.value = false
@@ -553,6 +569,8 @@ createApp({
         try { studioAbort.value.abort() } catch (e) {}
         isSummarizing.value = false
         isExtracting.value = false
+        isOutlining.value = false
+        isPolishing.value = false
         isRewriting.value = false
         isWriting.value = false
         isRebutting.value = false
@@ -583,7 +601,7 @@ createApp({
           (chunk) => {
             summarizeOutput.value = chunk
           },
-          studioAbort.value.signal
+          runCtrl.signal
         )
       } catch (e) {
         summarizeOutput.value = `> ⚠️ **摘要失败**：${e.message}`
@@ -598,7 +616,7 @@ createApp({
       }
     }
 
-    // 运行 Extract 结构化萃取
+    // 运行 Extract 结构化萃取（面向常规文章，不限学术）
     async function runExtract() {
       if (!extractInput.value.trim() || isExtracting.value) return
       isExtracting.value = true
@@ -608,14 +626,15 @@ createApp({
       const styleText = extractStyle.value === 'table'
         ? '请以 Markdown 表格输出，表头自行根据内容确定'
         : '请以多级要点清单输出'
-      const prompt = `请将以下长文本萃取为结构化信息。${styleText}。\n\n` +
-        `必须覆盖这些维度（原文没有的标注 N/A）：研究动机 Motivation、核心方法 Method、` +
-        `数据集与基线 Datasets & Baselines、量化结果 Results、局限性 Limitations。\n\n` +
-        `【待萃取文本】：\n${extractInput.value}`
+      const prompt = `请将以下文章整理为结构化信息。${styleText}。\n\n` +
+        `需要覆盖这些维度（原文没有的写「未提及」，不要编造）：\n` +
+        `- 主题与核心观点\n- 关键信息与要点\n- 涉及的人物/机构/时间/地点\n` +
+        `- 给出的数据、结论或建议\n- 需要注意的事项\n\n` +
+        `【待整理文章】：\n${extractInput.value}`
 
       try {
         const session = await ChromeAIService.createChatSession({
-          systemPrompt: '你是一位高效的信息萃取与文献分析专家，只输出结构化结果，不要复述原文。'
+          systemPrompt: '你是一位高效的内容整理专家，把长文提炼成清晰的结构化信息，只输出整理结果，不复述原文，不编造原文没有的内容。'
         })
         await ChromeAIService.streamPrompt(
           session,
@@ -623,10 +642,10 @@ createApp({
           ({ full }) => {
             extractOutput.value = full
           },
-          studioAbort.value.signal
+          runCtrl.signal
         )
       } catch (e) {
-        extractOutput.value = `> ⚠️ **萃取失败**：${e.message}`
+        extractOutput.value = `> ⚠️ **整理失败**：${e.message}`
       } finally {
         persistStudioSession(record, {
           input: extractInput.value,
@@ -636,6 +655,101 @@ createApp({
         isExtracting.value = false
         if (studioAbort.value === runCtrl) studioAbort.value = null
       }
+    }
+
+    // 运行 通用润色 (Polish)
+    async function runPolish() {
+      if (!polishInput.value.trim() || isPolishing.value) return
+      isPolishing.value = true
+      polishOutput.value = ''
+      const record = ensureStudioSession('polish')
+      const runCtrl = beginStudioRun()
+      const strengthText = {
+        light: '轻度润色：仅修正错别字、标点和明显不通顺的地方，尽量保留原文用词',
+        medium: '中度润色：优化语句通顺度与用词，调整啰嗦表达，保留原意与个人语气',
+        strong: '深度润色：可较大幅度重组句式，使表达更有条理和感染力，但不得改变事实与观点',
+      }[polishStrength.value]
+      const prompt = `请对以下文字进行润色（${strengthText}）。\n\n` +
+        `要求：只输出润色后的正文，不要解释修改过程；保持原意与事实不变；不要添加原文没有的信息。\n\n` +
+        `【原文】：\n${polishInput.value}`
+
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: '你是一位中文文字编辑，擅长在保留作者原意与语气的前提下让文字更通顺、准确、得体。只输出润色后的成品。'
+        })
+        await ChromeAIService.streamPrompt(
+          session,
+          prompt,
+          ({ full }) => {
+            polishOutput.value = full
+          },
+          runCtrl.signal
+        )
+      } catch (e) {
+        polishOutput.value = `> ⚠️ **润色失败**：${e.message}`
+      } finally {
+        persistStudioSession(record, {
+          input: polishInput.value,
+          options: { strength: polishStrength.value },
+          output: polishOutput.value,
+        })
+        isPolishing.value = false
+        if (studioAbort.value === runCtrl) studioAbort.value = null
+      }
+    }
+
+    // 运行 大纲生成 (Outline)
+    async function runOutline() {
+      if (!outlineTopic.value.trim() || isOutlining.value) return
+      isOutlining.value = true
+      outlineOutput.value = ''
+      const record = ensureStudioSession('outline')
+      const runCtrl = beginStudioRun()
+      const typeText = {
+        article: '一篇通俗文章',
+        report: '一份工作汇报',
+        speech: '一篇演讲稿',
+        social: '一条社交媒体长文',
+      }[outlineType.value]
+      const depthText = {
+        brief: '只给一级标题，精炼到 5-6 条',
+        medium: '给到二级标题，每条附一句话说明',
+        detailed: '给到三级标题，并标注每节要讲的重点与需要的素材',
+      }[outlineDepth.value]
+      const prompt = `请围绕下面的主题，拟一份${typeText}的写作大纲：\n\n${outlineTopic.value}\n\n` +
+        `要求：${depthText}；标题要具体、有信息量，不要「引言 / 正文 / 结语」这类空泛标题；` +
+        `开头先用一句话说清这篇内容的核心立场或结论。`
+
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: '你是一位资深内容策划与编辑，擅长为各类选题搭建清晰、有信息量的写作大纲。'
+        })
+        await ChromeAIService.streamPrompt(
+          session,
+          prompt,
+          ({ full }) => {
+            outlineOutput.value = full
+          },
+          runCtrl.signal
+        )
+      } catch (e) {
+        outlineOutput.value = `> ⚠️ **大纲生成失败**：${e.message}`
+      } finally {
+        persistStudioSession(record, {
+          input: outlineTopic.value,
+          options: { type: outlineType.value, depth: outlineDepth.value },
+          output: outlineOutput.value,
+        })
+        isOutlining.value = false
+        if (studioAbort.value === runCtrl) studioAbort.value = null
+      }
+    }
+
+    // 交换翻译的源语言与目标语言
+    function swapTranslateLang() {
+      const from = translateSource.value
+      translateSource.value = translateTarget.value
+      translateTarget.value = from
     }
 
     // 运行 Rewriter 模式
@@ -655,7 +769,7 @@ createApp({
           (chunk) => {
             rewriteOutput.value = chunk
           },
-          studioAbort.value.signal
+          runCtrl.signal
         )
       } catch (e) {
         rewriteOutput.value = `> ⚠️ **润色失败**：${e.message}`
@@ -690,7 +804,7 @@ createApp({
           (chunk) => {
             writeOutput.value = chunk
           },
-          studioAbort.value.signal
+          runCtrl.signal
         )
       } catch (e) {
         writeOutput.value = `> ⚠️ **起草失败**：${e.message}`
@@ -735,7 +849,7 @@ createApp({
           ({ full }) => {
             rebuttalOutput.value = full
           },
-          studioAbort.value.signal
+          runCtrl.signal
         )
       } catch (e) {
         rebuttalOutput.value = `> ⚠️ **生成答辩失败**：${e.message}`
@@ -751,9 +865,8 @@ createApp({
       }
     }
 
-    // 模式 6：Proofread 语法深度纠错状态
+    // 模式 6：Proofread 文字纠错状态（中英文通用，无需选择标准）
     const proofreadInput = ref('')
-    const proofreadStandard = ref('strict')
     const proofreadOutput = ref('')
     const isProofreading = ref(false)
 
@@ -763,15 +876,17 @@ createApp({
       proofreadOutput.value = ''
       const record = ensureStudioSession('proofread')
       const runCtrl = beginStudioRun()
-      const prompt = `请对以下英文学术段落进行严苛的语法检查与审校（标准：${proofreadStandard.value === 'strict' ? '顶级期刊出版级严谨标准' : '简洁清晰自然表达'}）：\n\n` +
-        `【待检查段落】：\n${proofreadInput.value}\n\n` +
-        `请输出：\n` +
-        `1. 🎯【精校全文】（符合顶级国际期刊的高质量版本）；\n` +
-        `2. 🔍【修改对照与原因分析】（逐条列出原句、修改建议及语法/搭配规则）。`
+      const prompt = `请检查并修改以下文字中的错误：\n\n` +
+        `【原文】：\n${proofreadInput.value}\n\n` +
+        `需要修正：错别字、语法错误、标点误用、搭配不当、语句不通顺、重复啰嗦。\n` +
+        `请按以下格式输出：\n` +
+        `1. ✅【修正后的全文】（可直接使用，保持原文语言与风格，不改动原意）；\n` +
+        `2. 🔍【修改清单】（表格列出：原文片段 → 修改后 → 原因）。\n` +
+        `若原文没有错误，请直接说明「未发现明显错误」，不要强行修改。`
 
       try {
         const session = await ChromeAIService.createChatSession({
-          systemPrompt: 'You are a professional academic copyeditor and grammarian for Nature and IEEE publications.'
+          systemPrompt: '你是一位严谨的文字校对员，精通中文与英文的语法、标点与用词规范。只修正错误，不改变作者原意与写作风格。'
         })
         await ChromeAIService.streamPrompt(
           session,
@@ -779,14 +894,13 @@ createApp({
           ({ full }) => {
             proofreadOutput.value = full
           },
-          studioAbort.value.signal
+          runCtrl.signal
         )
       } catch (e) {
-        proofreadOutput.value = `> ⚠️ **语法查错失败**：${e.message}`
+        proofreadOutput.value = `> ⚠️ **纠错失败**：${e.message}`
       } finally {
         persistStudioSession(record, {
           input: proofreadInput.value,
-          options: { standard: proofreadStandard.value },
           output: proofreadOutput.value,
         })
         isProofreading.value = false
@@ -804,6 +918,7 @@ createApp({
     // 模式 9：脚本编写 (Script Writer)
     const scriptRequirement = ref('')
     const scriptType = ref('bash') // 'bash' | 'bat' | 'powershell'
+    const scriptNoComment = ref(false) // 不要注释
     const scriptOutput = ref('')
     const isScripting = ref(false)
 
@@ -838,7 +953,7 @@ createApp({
           ({ full }) => {
             codeOutput.value = full
           },
-          studioAbort.value.signal
+          runCtrl.signal
         )
       } catch (e) {
         codeOutput.value = `> ⚠️ **代码审查失败**：${e.message}`
@@ -870,7 +985,7 @@ createApp({
           (chunk) => {
             translateOutput.value = chunk
           },
-          studioAbort.value.signal
+          runCtrl.signal
         )
       } catch (e) {
         translateOutput.value = `> ⚠️ **翻译失败**：${e.message}`
@@ -894,13 +1009,16 @@ createApp({
       const runCtrl = beginStudioRun()
 
       const platformText = { bash: 'Linux / macOS 的 Bash', bat: 'Windows 批处理 BAT', powershell: 'Windows PowerShell' }[scriptType.value]
+      const commentRule = scriptNoComment.value
+        ? '4. 【重要】不要在脚本中写任何注释，包括行首 # / REM / :: 以及行尾注释；仅脚本代码块外的说明文字可以解释；'
+        : '4. 关键步骤加中文注释；'
       const prompt = `请编写一段${platformText}脚本，满足以下需求：\n\n${scriptRequirement.value}\n\n` +
         `要求：\n` +
         `1. 直接给出完整可运行的脚本代码块（语言标记用 ${scriptType.value}）；\n` +
         `2. 开启严格模式（Bash 用 set -euo pipefail；PowerShell 用 $ErrorActionPreference = "Stop"；BAT 用 @echo off 并显式判错）；\n` +
         `3. 变量加引号、校验入参、处理路径含空格的情况；\n` +
-        `4. 关键步骤加中文注释，必要时给出幂等与错误处理；\n` +
-        `5. 脚本后附「用法示例」与「前置依赖与注意事项」。`
+        commentRule + `\n` +
+        `5. 脚本后另起一节附「用法示例」与「前置依赖与注意事项」（这一节不属于脚本，不受上一条约束）。`
 
       try {
         const session = await ChromeAIService.createChatSession({
@@ -1028,8 +1146,18 @@ createApp({
           break
         case 'proofread':
           proofreadInput.value = s.input || ''
-          if (opt.standard) proofreadStandard.value = opt.standard
           proofreadOutput.value = s.output || ''
+          break
+        case 'polish':
+          polishInput.value = s.input || ''
+          if (opt.strength) polishStrength.value = opt.strength
+          polishOutput.value = s.output || ''
+          break
+        case 'outline':
+          outlineTopic.value = s.input || ''
+          if (opt.type) outlineType.value = opt.type
+          if (opt.depth) outlineDepth.value = opt.depth
+          outlineOutput.value = s.output || ''
           break
         case 'codereview':
           codeInput.value = s.input || ''
@@ -1109,6 +1237,7 @@ createApp({
       activeSessionId,
       sidebarOpen,
       settingsModalOpen,
+      diagModalOpen,
       roleModalOpen,
       ROLE_PRESETS,
       rolesInGroup,
@@ -1165,6 +1294,19 @@ createApp({
       extractOutput,
       isExtracting,
       runExtract,
+      // Polish
+      polishInput,
+      polishStrength,
+      polishOutput,
+      isPolishing,
+      runPolish,
+      // Outline
+      outlineTopic,
+      outlineType,
+      outlineDepth,
+      outlineOutput,
+      isOutlining,
+      runOutline,
       // Rewriter
       rewriteInput,
       rewriteOutput,
@@ -1209,9 +1351,11 @@ createApp({
       translateOutput,
       isTranslating,
       runTranslate,
+      swapTranslateLang,
       // Script
       scriptRequirement,
       scriptType,
+      scriptNoComment,
       scriptOutput,
       isScripting,
       runScript,

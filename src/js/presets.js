@@ -3,13 +3,15 @@
  */
 export const MODE_META = {
   chat: { icon: '💬', label: '自由对话' },
-  summarizer: { icon: '📝', label: '论文摘要' },
+  summarizer: { icon: '📝', label: '文章摘要' },
   extract: { icon: '🧾', label: '结构化萃取' },
+  outline: { icon: '🧭', label: '大纲生成' },
   rewriter: { icon: '✨', label: '学术润色' },
   rebuttal: { icon: '🛡️', label: '审稿答辩' },
-  writer: { icon: '✍️', label: '辅助起草' },
-  proofread: { icon: '🔍', label: '语法纠错' },
-  translate: { icon: '🌐', label: '学术翻译' },
+  writer: { icon: '✍️', label: '文案起草' },
+  proofread: { icon: '🔍', label: '文字纠错' },
+  translate: { icon: '🌐', label: '中英互译' },
+  polish: { icon: '🪄', label: '通用润色' },
   codereview: { icon: '💻', label: '代码审查' },
   script: { icon: '🧩', label: '脚本编写' },
 }
@@ -22,13 +24,13 @@ export const MODE_GROUPS = [
     id: 'paper',
     label: '学术与文献',
     icon: '📄',
-    modes: ['summarizer', 'extract', 'rewriter', 'rebuttal'],
+    modes: ['summarizer', 'rewriter', 'rebuttal'],
   },
   {
     id: 'drafting',
-    label: '起草与文字',
+    label: '文字处理',
     icon: '✍️',
-    modes: ['writer', 'proofread', 'translate'],
+    modes: ['writer', 'outline', 'extract', 'polish', 'proofread', 'translate'],
   },
   {
     id: 'code',
