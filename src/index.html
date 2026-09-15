@@ -510,7 +510,7 @@
               <button class="writer-scene-chip" @click="washAgainWithStyle('zhihu')">知乎</button>
             </div>
             <div v-if="washHistory.length" style="margin-top:12px;font-size:0.74rem;color:var(--text-muted);">
-              已生成 {{ washHistory.length }} 个版本（点击下方可回看）
+              已生成 {{ washHistory.length }} 个版本（点击可复制该版本）
               <div class="writer-scenes" style="margin-top:6px;">
                 <button
                   v-for="(h, i) in washHistory"
@@ -518,7 +518,7 @@
                   class="writer-scene-chip"
                   @click="copyToClipboard(h.text)"
                   :title="'复制第 ' + (washHistory.length - i) + ' 版'"
-                >第 {{ washHistory.length - i }} 版 · {{ {wechat:'公众号',xiaohongshu:'小红书',toutiao:'资讯',zhihu:'知乎'}[h.style] }}</button>
+                >第 {{ washHistory.length - i }} 版 · {{ styleLabel(h.style) }}</button>
               </div>
             </div>
           </div>

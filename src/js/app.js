@@ -874,6 +874,11 @@ createApp({
       }
     }
 
+    // 洗稿平台风格的中文名（模板里用它，避免在模板内直接写对象字面量）
+    function styleLabel(style) {
+      return { wechat: '公众号', xiaohongshu: '小红书', toutiao: '资讯', zhihu: '知乎' }[style] || style
+    }
+
     // 换一个平台风格，用上一版结果继续洗
     function washAgainWithStyle(style) {
       washStyle.value = style
@@ -1521,6 +1526,7 @@ createApp({
       isWashing,
       runWash,
       washAgainWithStyle,
+      styleLabel,
       // Dictionary（单词查询）
       dictWord,
       dictOutput,
