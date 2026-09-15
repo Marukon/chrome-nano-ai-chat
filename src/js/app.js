@@ -131,6 +131,7 @@ createApp({
 
     // 单词查询 (Dictionary)
     const dictWord = ref('')
+    const dictDetail = ref(false) // false=只出释义；true=附带音标/例句/搭配等
     const dictOutput = ref('')
     const isDictRunning = ref(false)
     const dictHistory = ref([])
@@ -171,15 +172,20 @@ createApp({
       return ROLE_PRESETS.find(r => r.id === roleId) || ROLE_PRESETS[0]
     })
 
-    // 工具面板（Studio）共用的中断控制器
-    const studioAbort = ref(null)
+    /* ============================================================
+       工具面板（Studio）任务调度
+       端侧模型同一时刻只能跑一个推理，多个任务并行会互相拖慢。
+       这里用「队列」而非「抢占」：新任务排在正在运行的任务后面，
+       不会中断前面的任务，前一个跑完自动接上。
+       ============================================================ */
 
-    // 停止当前工具面板的生成（保留已输出的部分内容）
-    function stopStudio() {
-      if (studioAbort.value) {
-        studioAbort.value.abort()
-        studioAbort.value = null
-      }
+    // 当前正在运行的任务控制器（仅有一个）
+    const studioAbort = ref(null)
+    // 等待中的任务 { mode, run }
+    const studioQueue = ref([])
+
+    // 所有工具面板的运行标记，集中重置用
+    function resetStudioFlags() {
       isSummarizing.value = false
       isExtracting.value = false
       isOutlining.value = false
@@ -194,6 +200,55 @@ createApp({
       isTranslating.value = false
       isCodeReviewing.value = false
       isScripting.value = false
+    }
+
+    /**
+     * 提交一个工具任务：空闲则立即执行，忙则排队（不打断正在跑的任务）
+     * @param {string} mode 模式 id，用于队列展示
+     * @param {Function} runner 实际执行体，接收 AbortSignal
+     * @returns {Promise} 任务完成（或排队后完成）的 Promise
+     */
+    function enqueueStudioTask(mode, runner) {
+      return new Promise((resolve) => {
+        const task = { mode, runner, resolve }
+        if (studioAbort.value) {
+          // 已有任务在跑 → 排队等待，不中断前一个
+          studioQueue.value = [...studioQueue.value, task]
+          showToast(`已加入队列（前面还有 ${studioQueue.value.length} 个任务）`)
+          return
+        }
+        runStudioTask(task)
+      })
+    }
+
+    // 立即执行一个任务，结束后自动取队列下一个
+    async function runStudioTask(task) {
+      const ctrl = new AbortController()
+      studioAbort.value = ctrl
+      try {
+        await task.runner(ctrl.signal)
+      } catch (e) {
+        console.error('[NanoAI] 工具任务执行失败:', e)
+      } finally {
+        // 只有自己仍是当前任务时才收尾，避免误清后续任务的状态
+        if (studioAbort.value === ctrl) studioAbort.value = null
+        task.resolve?.()
+        const [next, ...rest] = studioQueue.value
+        studioQueue.value = rest
+        if (next) runStudioTask(next)
+      }
+    }
+
+    // 停止：中断正在运行的任务并清空队列（保留已输出的部分内容）
+    function stopStudio() {
+      if (studioAbort.value) {
+        try { studioAbort.value.abort() } catch (e) {}
+        studioAbort.value = null
+      }
+      const dropped = studioQueue.value.length
+      studioQueue.value = []
+      resetStudioFlags()
+      if (dropped) showToast(`已停止生成，并取消 ${dropped} 个排队任务`)
     }
 
     // Markdown 解析与 LaTeX 公式渲染器
@@ -643,291 +698,267 @@ createApp({
       showToast(`已切换为「${role.name}」，直接输入问题即可`)
     }
 
-    // 开始新的工具运行前，中断上一个仍在跑的生成，避免共用 studioAbort 时
-    // 旧任务的 finally 把新任务的状态一并清掉（停止按钮"点了没反应"）
-    function beginStudioRun() {
-      if (studioAbort.value) {
-        try { studioAbort.value.abort() } catch (e) {}
-        isSummarizing.value = false
-        isExtracting.value = false
-        isOutlining.value = false
-        isPolishing.value = false
-        isRewriteSrcRunning.value = false
-        isWashing.value = false
-        isDictRunning.value = false
-        isRewriting.value = false
-        isWriting.value = false
-        isRebutting.value = false
-        isProofreading.value = false
-        isTranslating.value = false
-        isCodeReviewing.value = false
-        isScripting.value = false
-      }
-      studioAbort.value = new AbortController()
-      return studioAbort.value
-    }
-
     // 运行 Summarizer 模式
     async function runSummarizer() {
       if (!summarizeInput.value.trim() || isSummarizing.value) return
-      isSummarizing.value = true
-      summarizeOutput.value = ''
-      const record = ensureStudioSession('summarizer')
-      const runCtrl = beginStudioRun()
-      try {
-        await ChromeAIService.summarize(
-          summarizeInput.value,
-          {
-            type: summarizeType.value,
-            length: summarizeLength.value,
-            format: summarizeFormat.value,
-          },
-          (chunk) => {
-            summarizeOutput.value = chunk
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        summarizeOutput.value = `> ⚠️ **摘要失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: summarizeInput.value,
-          options: { type: summarizeType.value, length: summarizeLength.value },
-          output: summarizeOutput.value,
-        })
-        isSummarizing.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+      await enqueueStudioTask('summarizer', async (signal) => {
+        isSummarizing.value = true
+        summarizeOutput.value = ''
+        const record = ensureStudioSession('summarizer')
+        try {
+          await ChromeAIService.summarize(
+            summarizeInput.value,
+            {
+              type: summarizeType.value,
+              length: summarizeLength.value,
+              format: summarizeFormat.value,
+            },
+            (chunk) => {
+              summarizeOutput.value = chunk
+            },
+            signal
+          )
+        } catch (e) {
+          summarizeOutput.value = `> ⚠️ **摘要失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: summarizeInput.value,
+            options: { type: summarizeType.value, length: summarizeLength.value },
+            output: summarizeOutput.value,
+          })
+          isSummarizing.value = false
+        }
+      })
     }
 
     // 运行 Extract 结构化萃取（面向常规文章，不限学术）
     async function runExtract() {
       if (!extractInput.value.trim() || isExtracting.value) return
-      isExtracting.value = true
-      extractOutput.value = ''
-      const record = ensureStudioSession('extract')
-      const runCtrl = beginStudioRun()
-      const styleText = extractStyle.value === 'table'
-        ? '请以 Markdown 表格输出，表头自行根据内容确定'
-        : '请以多级要点清单输出'
-      const prompt = `请将以下文章整理为结构化信息。${styleText}。\n\n` +
-        `需要覆盖这些维度（原文没有的写「未提及」，不要编造）：\n` +
-        `- 主题与核心观点\n- 关键信息与要点\n- 涉及的人物/机构/时间/地点\n` +
-        `- 给出的数据、结论或建议\n- 需要注意的事项\n\n` +
-        `【待整理文章】：\n${extractInput.value}`
+      await enqueueStudioTask('extract', async (signal) => {
+        isExtracting.value = true
+        extractOutput.value = ''
+        const record = ensureStudioSession('extract')
+        const styleText = extractStyle.value === 'table'
+          ? '请以 Markdown 表格输出，表头自行根据内容确定'
+          : '请以多级要点清单输出'
+        const prompt = `请将以下文章整理为结构化信息。${styleText}。\n\n` +
+          `需要覆盖这些维度（原文没有的写「未提及」，不要编造）：\n` +
+          `- 主题与核心观点\n- 关键信息与要点\n- 涉及的人物/机构/时间/地点\n` +
+          `- 给出的数据、结论或建议\n- 需要注意的事项\n\n` +
+          `【待整理文章】：\n${extractInput.value}`
 
-      try {
-        const session = await ChromeAIService.createChatSession({
-          systemPrompt: '你是一位高效的内容整理专家，把长文提炼成清晰的结构化信息，只输出整理结果，不复述原文，不编造原文没有的内容。'
-        })
-        await ChromeAIService.streamPrompt(
-          session,
-          prompt,
-          ({ full }) => {
-            extractOutput.value = full
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        extractOutput.value = `> ⚠️ **整理失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: extractInput.value,
-          options: { style: extractStyle.value },
-          output: extractOutput.value,
-        })
-        isExtracting.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+        try {
+          const session = await ChromeAIService.createChatSession({
+            systemPrompt: '你是一位高效的内容整理专家，把长文提炼成清晰的结构化信息，只输出整理结果，不复述原文，不编造原文没有的内容。'
+          })
+          await ChromeAIService.streamPrompt(
+            session,
+            prompt,
+            ({ full }) => {
+              extractOutput.value = full
+            },
+            signal
+          )
+        } catch (e) {
+          extractOutput.value = `> ⚠️ **整理失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: extractInput.value,
+            options: { style: extractStyle.value },
+            output: extractOutput.value,
+          })
+          isExtracting.value = false
+        }
+      })
     }
 
     // 运行 通用润色 (Polish)
     async function runPolish() {
       if (!polishInput.value.trim() || isPolishing.value) return
-      isPolishing.value = true
-      polishOutput.value = ''
-      const record = ensureStudioSession('polish')
-      const runCtrl = beginStudioRun()
-      const strengthText = {
-        light: '轻度润色：仅修正错别字、标点和明显不通顺的地方，尽量保留原文用词',
-        medium: '中度润色：优化语句通顺度与用词，调整啰嗦表达，保留原意与个人语气',
-        strong: '深度润色：可较大幅度重组句式，使表达更有条理和感染力，但不得改变事实与观点',
-      }[polishStrength.value]
-      const prompt = `请对以下文字进行润色（${strengthText}）。\n\n` +
-        `要求：只输出润色后的正文，不要解释修改过程；保持原意与事实不变；不要添加原文没有的信息。\n\n` +
-        `【原文】：\n${polishInput.value}`
+      await enqueueStudioTask('polish', async (signal) => {
+        isPolishing.value = true
+        polishOutput.value = ''
+        const record = ensureStudioSession('polish')
+        const strengthText = {
+          light: '轻度润色：仅修正错别字、标点和明显不通顺的地方，尽量保留原文用词',
+          medium: '中度润色：优化语句通顺度与用词，调整啰嗦表达，保留原意与个人语气',
+          strong: '深度润色：可较大幅度重组句式，使表达更有条理和感染力，但不得改变事实与观点',
+        }[polishStrength.value]
+        const prompt = `请对以下文字进行润色（${strengthText}）。\n\n` +
+          `要求：只输出润色后的正文，不要解释修改过程；保持原意与事实不变；不要添加原文没有的信息。\n\n` +
+          `【原文】：\n${polishInput.value}`
 
-      try {
-        const session = await ChromeAIService.createChatSession({
-          systemPrompt: '你是一位中文文字编辑，擅长在保留作者原意与语气的前提下让文字更通顺、准确、得体。只输出润色后的成品。'
-        })
-        await ChromeAIService.streamPrompt(
-          session,
-          prompt,
-          ({ full }) => {
-            polishOutput.value = full
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        polishOutput.value = `> ⚠️ **润色失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: polishInput.value,
-          options: { strength: polishStrength.value },
-          output: polishOutput.value,
-        })
-        isPolishing.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+        try {
+          const session = await ChromeAIService.createChatSession({
+            systemPrompt: '你是一位中文文字编辑，擅长在保留作者原意与语气的前提下让文字更通顺、准确、得体。只输出润色后的成品。'
+          })
+          await ChromeAIService.streamPrompt(
+            session,
+            prompt,
+            ({ full }) => {
+              polishOutput.value = full
+            },
+            signal
+          )
+        } catch (e) {
+          polishOutput.value = `> ⚠️ **润色失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: polishInput.value,
+            options: { strength: polishStrength.value },
+            output: polishOutput.value,
+          })
+          isPolishing.value = false
+        }
+      })
     }
 
     // 运行 大纲生成 (Outline)
     async function runOutline() {
       if (!outlineTopic.value.trim() || isOutlining.value) return
-      isOutlining.value = true
-      outlineOutput.value = ''
-      const record = ensureStudioSession('outline')
-      const runCtrl = beginStudioRun()
-      const typeText = {
-        article: '一篇通俗文章',
-        report: '一份工作汇报',
-        speech: '一篇演讲稿',
-        social: '一条社交媒体长文',
-      }[outlineType.value]
-      const depthText = {
-        brief: '只给一级标题，精炼到 5-6 条',
-        medium: '给到二级标题，每条附一句话说明',
-        detailed: '给到三级标题，并标注每节要讲的重点与需要的素材',
-      }[outlineDepth.value]
-      const prompt = `请围绕下面的主题，拟一份${typeText}的写作大纲：\n\n${outlineTopic.value}\n\n` +
-        `要求：${depthText}；标题要具体、有信息量，不要「引言 / 正文 / 结语」这类空泛标题；` +
-        `开头先用一句话说清这篇内容的核心立场或结论。`
+      await enqueueStudioTask('outline', async (signal) => {
+        isOutlining.value = true
+        outlineOutput.value = ''
+        const record = ensureStudioSession('outline')
+        const typeText = {
+          article: '一篇通俗文章',
+          report: '一份工作汇报',
+          speech: '一篇演讲稿',
+          social: '一条社交媒体长文',
+        }[outlineType.value]
+        const depthText = {
+          brief: '只给一级标题，精炼到 5-6 条',
+          medium: '给到二级标题，每条附一句话说明',
+          detailed: '给到三级标题，并标注每节要讲的重点与需要的素材',
+        }[outlineDepth.value]
+        const prompt = `请围绕下面的主题，拟一份${typeText}的写作大纲：\n\n${outlineTopic.value}\n\n` +
+          `要求：${depthText}；标题要具体、有信息量，不要「引言 / 正文 / 结语」这类空泛标题；` +
+          `开头先用一句话说清这篇内容的核心立场或结论。`
 
-      try {
-        const session = await ChromeAIService.createChatSession({
-          systemPrompt: '你是一位资深内容策划与编辑，擅长为各类选题搭建清晰、有信息量的写作大纲。'
-        })
-        await ChromeAIService.streamPrompt(
-          session,
-          prompt,
-          ({ full }) => {
-            outlineOutput.value = full
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        outlineOutput.value = `> ⚠️ **大纲生成失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: outlineTopic.value,
-          options: { type: outlineType.value, depth: outlineDepth.value },
-          output: outlineOutput.value,
-        })
-        isOutlining.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+        try {
+          const session = await ChromeAIService.createChatSession({
+            systemPrompt: '你是一位资深内容策划与编辑，擅长为各类选题搭建清晰、有信息量的写作大纲。'
+          })
+          await ChromeAIService.streamPrompt(
+            session,
+            prompt,
+            ({ full }) => {
+              outlineOutput.value = full
+            },
+            signal
+          )
+        } catch (e) {
+          outlineOutput.value = `> ⚠️ **大纲生成失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: outlineTopic.value,
+            options: { type: outlineType.value, depth: outlineDepth.value },
+            output: outlineOutput.value,
+          })
+          isOutlining.value = false
+        }
+      })
     }
 
     // 运行 改写降重 (Rewrite)：学术论文向，改写表达、降低查重文字重合度
     async function runRewrite() {
       if (!rewriteSrcInput.value.trim() || isRewriteSrcRunning.value) return
-      isRewriteSrcRunning.value = true
-      rewriteSrcOutput.value = ''
-      const record = ensureStudioSession('rewrite')
-      const runCtrl = beginStudioRun()
-      const strengthText = {
-        light: '轻度改写：替换同义词、调整语序，重合度降低幅度有限',
-        medium: '中度改写：重构句式与段落组织，明显降低文字重合度',
-        strong: '深度改写：重新组织论述结构与表达方式，最大幅度降低重合度',
-      }[rewriteSrcStrength.value]
-      const prompt = `请对以下学术文字进行改写降重（${strengthText}）。\n\n` +
-        `硬性要求：\n` +
-        `1. 严格保留原文的事实、数据、观点与结论，不得增删或歪曲；\n` +
-        `2. 专有名词、术语、公式、引用标注（如 [1]、参考文献编号）保持原样；\n` +
-        `3. 变换句式结构（主动/被动互换、长短句重组）、替换同义学术表达、调整逻辑连接词；\n` +
-        `4. 段落数量与先后顺序尽量与原文对应，便于逐段替换；\n` +
-        `5. 保持学术语体的严谨客观，不要口语化、不要添加原文没有的论断；\n` +
-        `6. 只输出改写后的正文，不要解释改写手法。\n\n` +
-        `【原文】：\n${rewriteSrcInput.value}`
+      await enqueueStudioTask('rewrite', async (signal) => {
+        isRewriteSrcRunning.value = true
+        rewriteSrcOutput.value = ''
+        const record = ensureStudioSession('rewrite')
+        const strengthText = {
+          light: '轻度改写：替换同义词、调整语序，重合度降低幅度有限',
+          medium: '中度改写：重构句式与段落组织，明显降低文字重合度',
+          strong: '深度改写：重新组织论述结构与表达方式，最大幅度降低重合度',
+        }[rewriteSrcStrength.value]
+        const prompt = `请对以下学术文字进行改写降重（${strengthText}）。\n\n` +
+          `硬性要求：\n` +
+          `1. 严格保留原文的事实、数据、观点与结论，不得增删或歪曲；\n` +
+          `2. 专有名词、术语、公式、引用标注（如 [1]、参考文献编号）保持原样；\n` +
+          `3. 变换句式结构（主动/被动互换、长短句重组）、替换同义学术表达、调整逻辑连接词；\n` +
+          `4. 段落数量与先后顺序尽量与原文对应，便于逐段替换；\n` +
+          `5. 保持学术语体的严谨客观，不要口语化、不要添加原文没有的论断；\n` +
+          `6. 只输出改写后的正文，不要解释改写手法。\n\n` +
+          `【原文】：\n${rewriteSrcInput.value}`
 
-      try {
-        const session = await ChromeAIService.createChatSession({
-          systemPrompt: '你是一位专业的学术文字改写专家，擅长在完全保留原意、数据与引用标注的前提下重构表达方式、降低查重文字重合度。只输出改写后的成品。'
-        })
-        await ChromeAIService.streamPrompt(
-          session,
-          prompt,
-          ({ full }) => {
-            rewriteSrcOutput.value = full
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        rewriteSrcOutput.value = `> ⚠️ **改写降重失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: rewriteSrcInput.value,
-          options: { strength: rewriteSrcStrength.value },
-          output: rewriteSrcOutput.value,
-        })
-        isRewriteSrcRunning.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+        try {
+          const session = await ChromeAIService.createChatSession({
+            systemPrompt: '你是一位专业的学术文字改写专家，擅长在完全保留原意、数据与引用标注的前提下重构表达方式、降低查重文字重合度。只输出改写后的成品。'
+          })
+          await ChromeAIService.streamPrompt(
+            session,
+            prompt,
+            ({ full }) => {
+              rewriteSrcOutput.value = full
+            },
+            signal
+          )
+        } catch (e) {
+          rewriteSrcOutput.value = `> ⚠️ **改写降重失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: rewriteSrcInput.value,
+            options: { strength: rewriteSrcStrength.value },
+            output: rewriteSrcOutput.value,
+          })
+          isRewriteSrcRunning.value = false
+        }
+      })
     }
 
     // 运行 洗稿 (Wash)：自媒体文案向，保留信息点重写表达
     async function runWash() {
       if (!washInput.value.trim() || isWashing.value) return
-      isWashing.value = true
-      washOutput.value = ''
-      const record = ensureStudioSession('wash')
-      const runCtrl = beginStudioRun()
-      const styleText = {
-        wechat: '微信公众号长文：有小标题、段落短、节奏舒服，开头三行内抓住读者',
-        xiaohongshu: '小红书笔记：口语化、有 emoji 分点、像分享经验，结尾自然引导互动',
-        toutiao: '资讯平台文章：客观叙述、信息密度高、结论前置',
-        zhihu: '知乎回答：先给结论，再分点论证，理性克制，可举例说明',
-      }[washStyle.value]
-      const prompt = `请对以下内容进行洗稿改写，目标风格：${styleText}。\n\n` +
-        `要求：\n` +
-        `1. 保留原文的全部信息点与核心观点，不新增未经证实的说法，不扭曲原意；\n` +
-        `2. 重新组织语言与段落结构，换掉原文的句式与措辞，不要逐句替换的同义词式改写；\n` +
-        `3. 调整叙述角度与顺序，使文章读起来是重新写的，而不是原文的复制；\n` +
-        `4. 涉及的具体数据、人名、机构名、时间必须与原文一致，不得改动；\n` +
-        `5. 直接输出成品，不要解释改写思路，不要加"以下是"之类的前后缀。\n\n` +
-        `【原文】：\n${washInput.value}`
+      await enqueueStudioTask('wash', async (signal) => {
+        isWashing.value = true
+        washOutput.value = ''
+        const record = ensureStudioSession('wash')
+        const styleText = {
+          wechat: '微信公众号长文：有小标题、段落短、节奏舒服，开头三行内抓住读者',
+          xiaohongshu: '小红书笔记：口语化、有 emoji 分点、像分享经验，结尾自然引导互动',
+          toutiao: '资讯平台文章：客观叙述、信息密度高、结论前置',
+          zhihu: '知乎回答：先给结论，再分点论证，理性克制，可举例说明',
+        }[washStyle.value]
+        const prompt = `请对以下内容进行洗稿改写，目标风格：${styleText}。\n\n` +
+          `要求：\n` +
+          `1. 保留原文的全部信息点与核心观点，不新增未经证实的说法，不扭曲原意；\n` +
+          `2. 重新组织语言与段落结构，换掉原文的句式与措辞，不要逐句替换的同义词式改写；\n` +
+          `3. 调整叙述角度与顺序，使文章读起来是重新写的，而不是原文的复制；\n` +
+          `4. 涉及的具体数据、人名、机构名、时间必须与原文一致，不得改动；\n` +
+          `5. 直接输出成品，不要解释改写思路，不要加"以下是"之类的前后缀。\n\n` +
+          `【原文】：\n${washInput.value}`
 
-      try {
-        const session = await ChromeAIService.createChatSession({
-          systemPrompt: '你是一位资深内容编辑，擅长把一篇文章按目标平台的调性重新组织语言与结构，同时完整保留原文的信息与事实。'
-        })
-        await ChromeAIService.streamPrompt(
-          session,
-          prompt,
-          ({ full }) => {
-            washOutput.value = full
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        washOutput.value = `> ⚠️ **洗稿失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: washInput.value,
-          options: { style: washStyle.value },
-          output: washOutput.value,
-        })
-        // 记录本次版本，便于对比与迭代
-        if (washOutput.value && !washOutput.value.startsWith('> ⚠️')) {
-          washHistory.value = [
-            { style: washStyle.value, text: washOutput.value, at: Date.now() },
-            ...washHistory.value,
-          ].slice(0, 6)
+        try {
+          const session = await ChromeAIService.createChatSession({
+            systemPrompt: '你是一位资深内容编辑，擅长把一篇文章按目标平台的调性重新组织语言与结构，同时完整保留原文的信息与事实。'
+          })
+          await ChromeAIService.streamPrompt(
+            session,
+            prompt,
+            ({ full }) => {
+              washOutput.value = full
+            },
+            signal
+          )
+        } catch (e) {
+          washOutput.value = `> ⚠️ **洗稿失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: washInput.value,
+            options: { style: washStyle.value },
+            output: washOutput.value,
+          })
+          // 记录本次版本，便于对比与迭代
+          if (washOutput.value && !washOutput.value.startsWith('> ⚠️')) {
+            washHistory.value = [
+              { style: washStyle.value, text: washOutput.value, at: Date.now() },
+              ...washHistory.value,
+            ].slice(0, 6)
+          }
+          isWashing.value = false
         }
-        isWashing.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+      })
     }
 
     // 洗稿平台风格的中文名（模板里用它，避免在模板内直接写对象字面量）
@@ -948,49 +979,65 @@ createApp({
     async function runDictionary() {
       const word = dictWord.value.trim()
       if (!word || isDictRunning.value) return
-      isDictRunning.value = true
-      dictOutput.value = ''
-      const record = ensureStudioSession('dict')
-      const runCtrl = beginStudioRun()
-      const prompt = `请查询并解释：${word}\n\n` +
-        `请按以下格式输出（中文解释，原文没有的信息不要编造，不确定时明确说明）：\n` +
-        `## 释义\n` +
-        `- 词性 + 中文释义（多个义项分行列出，常用的排前面）\n\n` +
-        `## 发音\n` +
-        `- 英式 / 美式 音标（若为英文单词）\n\n` +
-        `## 例句\n` +
-        `- 2-3 个例句，每句给出原文 + 中文翻译，体现不同用法\n\n` +
-        `## 搭配与辨析\n` +
-        `- 常见固定搭配、近义词辨析、易错用法\n\n` +
-        `## 记忆提示\n` +
-        `- 词根词缀或联想记忆（可选）\n\n` +
-        `如果是中文词，请给出对应的英文表达与用法说明；如果是术语或缩写，请给出全称与领域背景。`
+      await enqueueStudioTask('dict', async (signal) => {
+        isDictRunning.value = true
+        dictOutput.value = ''
+        const record = ensureStudioSession('dict')
 
-      try {
-        const session = await ChromeAIService.createChatSession({
-          systemPrompt: '你是一位严谨的词典编纂者，熟悉英汉双解词典与语言学知识。释义要准确、克制，不确定的信息必须说明不确定，不得编造音标与用法。'
-        })
-        await ChromeAIService.streamPrompt(
-          session,
-          prompt,
-          ({ full }) => {
-            dictOutput.value = full
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        dictOutput.value = `> ⚠️ **查询失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: word,
-          output: dictOutput.value,
-        })
-        if (!dictHistory.value.includes(word)) {
-          dictHistory.value = [word, ...dictHistory.value].slice(0, 12)
+        // 默认只给释义（快、短）；勾选"更多"才输出音标/例句/搭配等扩展内容
+        const prompt = dictDetail.value
+          ? `请查询并解释：${word}\n\n` +
+            `请按以下格式输出（中文解释，原文没有的信息不要编造，不确定时明确说明）：\n` +
+            `## 释义\n` +
+            `- 词性 + 中文释义（多个义项分行列出，常用的排前面）\n\n` +
+            `## 发音\n` +
+            `- 英式 / 美式 音标（若为英文单词）\n\n` +
+            `## 例句\n` +
+            `- 2-3 个例句，每句给出原文 + 中文翻译，体现不同用法\n\n` +
+            `## 搭配与辨析\n` +
+            `- 常见固定搭配、近义词辨析、易错用法\n\n` +
+            `## 记忆提示\n` +
+            `- 词根词缀或联想记忆（可选）\n\n` +
+            `如果是中文词，请给出对应的英文表达与用法说明；如果是术语或缩写，请给出全称与领域背景。`
+          : `请解释：${word}\n\n` +
+            `要求：\n` +
+            `1. 先给音标（英文单词才需要，用 / / 标注）；\n` +
+            `2. 按词性列出中文释义，每个义项一行，常用的排前面；\n` +
+            `3. 中文词则给出对应的英文表达；\n` +
+            `4. 只输出释义相关内容，不要例句、搭配、辨析、词源或记忆方法；\n` +
+            `5. 简洁优先，总长度控制在 5 行以内；不确定的信息明确说明，不要编造。`
+
+        try {
+          const session = await ChromeAIService.createChatSession({
+            systemPrompt: '你是一位严谨的词典编纂者，熟悉英汉双解词典与语言学知识。释义要准确、克制，不确定的信息必须说明不确定，不得编造音标与用法。'
+          })
+          await ChromeAIService.streamPrompt(
+            session,
+            prompt,
+            ({ full }) => {
+              dictOutput.value = full
+            },
+            signal
+          )
+        } catch (e) {
+          dictOutput.value = `> ⚠️ **查询失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: word,
+            options: { detail: dictDetail.value },
+            output: dictOutput.value,
+          })
+          if (!dictHistory.value.includes(word)) {
+            dictHistory.value = [word, ...dictHistory.value].slice(0, 12)
+          }
+          isDictRunning.value = false
         }
-        isDictRunning.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+      })
+    }
+
+    // 切换"更多释义"后，若已有结果则按新选项重查一次
+    function toggleDictDetail() {
+      if (dictWord.value.trim() && dictOutput.value) runDictionary()
     }
 
     // 点击历史词条直接再查一次
@@ -1009,69 +1056,69 @@ createApp({
     // 运行 Rewriter 模式
     async function runRewriter() {
       if (!rewriteInput.value.trim() || isRewriting.value) return
-      isRewriting.value = true
-      rewriteOutput.value = ''
-      const record = ensureStudioSession('rewriter')
-      const runCtrl = beginStudioRun()
-      try {
-        await ChromeAIService.rewrite(
-          rewriteInput.value,
-          {
-            tone: rewriteTone.value,
-            length: rewriteLength.value,
-          },
-          (chunk) => {
-            rewriteOutput.value = chunk
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        rewriteOutput.value = `> ⚠️ **润色失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: rewriteInput.value,
-          options: { tone: rewriteTone.value, length: rewriteLength.value },
-          output: rewriteOutput.value,
-        })
-        isRewriting.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+      await enqueueStudioTask('rewriter', async (signal) => {
+        isRewriting.value = true
+        rewriteOutput.value = ''
+        const record = ensureStudioSession('rewriter')
+        try {
+          await ChromeAIService.rewrite(
+            rewriteInput.value,
+            {
+              tone: rewriteTone.value,
+              length: rewriteLength.value,
+            },
+            (chunk) => {
+              rewriteOutput.value = chunk
+            },
+            signal
+          )
+        } catch (e) {
+          rewriteOutput.value = `> ⚠️ **润色失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: rewriteInput.value,
+            options: { tone: rewriteTone.value, length: rewriteLength.value },
+            output: rewriteOutput.value,
+          })
+          isRewriting.value = false
+        }
+      })
     }
 
     // 运行 Writer 模式（日常文案：祝福 / 通知 / 社交回复）
     async function runWriter() {
       if (!writePrompt.value.trim() || isWriting.value) return
-      isWriting.value = true
-      writeOutput.value = ''
-      const record = ensureStudioSession('writer')
-      const runCtrl = beginStudioRun()
-      try {
-        await ChromeAIService.write(
-          writePrompt.value,
-          {
-            tone: writeTone.value === 'formal' ? 'formal' : 'casual',
-            length: writeLength.value,
+      await enqueueStudioTask('writer', async (signal) => {
+        isWriting.value = true
+        writeOutput.value = ''
+        const record = ensureStudioSession('writer')
+        try {
+          await ChromeAIService.write(
+            writePrompt.value,
+            {
+              tone: writeTone.value === 'formal' ? 'formal' : 'casual',
+              length: writeLength.value,
+              context: writeContext.value,
+              // 场景化系统提示词：覆盖祝福、通知、日常社交文案
+              scene: WRITER_SYSTEM_PROMPT,
+            },
+            (chunk) => {
+              writeOutput.value = chunk
+            },
+            signal
+          )
+        } catch (e) {
+          writeOutput.value = `> ⚠️ **起草失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            prompt: writePrompt.value,
             context: writeContext.value,
-            // 场景化系统提示词：覆盖祝福、通知、日常社交文案
-            scene: WRITER_SYSTEM_PROMPT,
-          },
-          (chunk) => {
-            writeOutput.value = chunk
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        writeOutput.value = `> ⚠️ **起草失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          prompt: writePrompt.value,
-          context: writeContext.value,
-          options: { tone: writeTone.value },
-          output: writeOutput.value,
-        })
-        isWriting.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+            options: { tone: writeTone.value },
+            output: writeOutput.value,
+          })
+          isWriting.value = false
+        }
+      })
     }
 
     // 模式 5：Rebuttal 审稿答辩状态
@@ -1083,40 +1130,40 @@ createApp({
 
     async function runRebuttal() {
       if (!rebuttalComment.value.trim() || isRebutting.value) return
-      isRebutting.value = true
-      rebuttalOutput.value = ''
-      const record = ensureStudioSession('rebuttal')
-      const runCtrl = beginStudioRun()
-      const prompt = `请作为国际顶级学术期刊与会议评审专家，为以下审稿人意见（Reviewer Comment）起草一份专业且具有说服力的 Point-by-Point 答辩信草稿：\n\n` +
-        `【审稿人质疑/评审意见】：\n${rebuttalComment.value}\n\n` +
-        (rebuttalResponse.value.trim() ? `【作者答辩要点与补充证据】：\n${rebuttalResponse.value}\n\n` : '') +
-        `【答辩语气】：${rebuttalTone.value === 'polite-firm' ? '既礼貌感激，又用事实与逻辑坚定澄清误解' : (rebuttalTone.value === 'appreciative-expand' ? '充分肯定审稿人洞察，详细展开补充实验' : '谦逊诚恳，说明已在正文做出修改')}\n\n` +
-        `请使用标准学术英文撰写，包含：1. 礼貌致谢；2. 针对性解释；3. 正文具体修改标注（Action in Revised Manuscript）。`
+      await enqueueStudioTask('rebuttal', async (signal) => {
+        isRebutting.value = true
+        rebuttalOutput.value = ''
+        const record = ensureStudioSession('rebuttal')
+        const prompt = `请作为国际顶级学术期刊与会议评审专家，为以下审稿人意见（Reviewer Comment）起草一份专业且具有说服力的 Point-by-Point 答辩信草稿：\n\n` +
+          `【审稿人质疑/评审意见】：\n${rebuttalComment.value}\n\n` +
+          (rebuttalResponse.value.trim() ? `【作者答辩要点与补充证据】：\n${rebuttalResponse.value}\n\n` : '') +
+          `【答辩语气】：${rebuttalTone.value === 'polite-firm' ? '既礼貌感激，又用事实与逻辑坚定澄清误解' : (rebuttalTone.value === 'appreciative-expand' ? '充分肯定审稿人洞察，详细展开补充实验' : '谦逊诚恳，说明已在正文做出修改')}\n\n` +
+          `请使用标准学术英文撰写，包含：1. 礼貌致谢；2. 针对性解释；3. 正文具体修改标注（Action in Revised Manuscript）。`
 
-      try {
-        const session = await ChromeAIService.createChatSession({
-          systemPrompt: 'You are an expert academic author skilled in peer-review rebuttal for top-tier venues like IEEE, ACM, Nature, and NeurIPS.'
-        })
-        await ChromeAIService.streamPrompt(
-          session,
-          prompt,
-          ({ full }) => {
-            rebuttalOutput.value = full
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        rebuttalOutput.value = `> ⚠️ **生成答辩失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          comment: rebuttalComment.value,
-          response: rebuttalResponse.value,
-          options: { tone: rebuttalTone.value },
-          output: rebuttalOutput.value,
-        })
-        isRebutting.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+        try {
+          const session = await ChromeAIService.createChatSession({
+            systemPrompt: 'You are an expert academic author skilled in peer-review rebuttal for top-tier venues like IEEE, ACM, Nature, and NeurIPS.'
+          })
+          await ChromeAIService.streamPrompt(
+            session,
+            prompt,
+            ({ full }) => {
+              rebuttalOutput.value = full
+            },
+            signal
+          )
+        } catch (e) {
+          rebuttalOutput.value = `> ⚠️ **生成答辩失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            comment: rebuttalComment.value,
+            response: rebuttalResponse.value,
+            options: { tone: rebuttalTone.value },
+            output: rebuttalOutput.value,
+          })
+          isRebutting.value = false
+        }
+      })
     }
 
     // 模式 6：Proofread 文字纠错状态（中英文通用，无需选择标准）
@@ -1126,40 +1173,40 @@ createApp({
 
     async function runProofread() {
       if (!proofreadInput.value.trim() || isProofreading.value) return
-      isProofreading.value = true
-      proofreadOutput.value = ''
-      const record = ensureStudioSession('proofread')
-      const runCtrl = beginStudioRun()
-      const prompt = `请检查并修改以下文字中的错误：\n\n` +
-        `【原文】：\n${proofreadInput.value}\n\n` +
-        `需要修正：错别字、语法错误、标点误用、搭配不当、语句不通顺、重复啰嗦。\n` +
-        `请按以下格式输出：\n` +
-        `1. ✅【修正后的全文】（可直接使用，保持原文语言与风格，不改动原意）；\n` +
-        `2. 🔍【修改清单】（表格列出：原文片段 → 修改后 → 原因）。\n` +
-        `若原文没有错误，请直接说明「未发现明显错误」，不要强行修改。`
+      await enqueueStudioTask('proofread', async (signal) => {
+        isProofreading.value = true
+        proofreadOutput.value = ''
+        const record = ensureStudioSession('proofread')
+        const prompt = `请检查并修改以下文字中的错误：\n\n` +
+          `【原文】：\n${proofreadInput.value}\n\n` +
+          `需要修正：错别字、语法错误、标点误用、搭配不当、语句不通顺、重复啰嗦。\n` +
+          `请按以下格式输出：\n` +
+          `1. ✅【修正后的全文】（可直接使用，保持原文语言与风格，不改动原意）；\n` +
+          `2. 🔍【修改清单】（表格列出：原文片段 → 修改后 → 原因）。\n` +
+          `若原文没有错误，请直接说明「未发现明显错误」，不要强行修改。`
 
-      try {
-        const session = await ChromeAIService.createChatSession({
-          systemPrompt: '你是一位严谨的文字校对员，精通中文与英文的语法、标点与用词规范。只修正错误，不改变作者原意与写作风格。'
-        })
-        await ChromeAIService.streamPrompt(
-          session,
-          prompt,
-          ({ full }) => {
-            proofreadOutput.value = full
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        proofreadOutput.value = `> ⚠️ **纠错失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: proofreadInput.value,
-          output: proofreadOutput.value,
-        })
-        isProofreading.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+        try {
+          const session = await ChromeAIService.createChatSession({
+            systemPrompt: '你是一位严谨的文字校对员，精通中文与英文的语法、标点与用词规范。只修正错误，不改变作者原意与写作风格。'
+          })
+          await ChromeAIService.streamPrompt(
+            session,
+            prompt,
+            ({ full }) => {
+              proofreadOutput.value = full
+            },
+            signal
+          )
+        } catch (e) {
+          proofreadOutput.value = `> ⚠️ **纠错失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: proofreadInput.value,
+            output: proofreadOutput.value,
+          })
+          isProofreading.value = false
+        }
+      })
     }
 
     // 模式 8：翻译 (Translate)
@@ -1184,119 +1231,119 @@ createApp({
 
     async function runCodeReview() {
       if (!codeInput.value.trim() || isCodeReviewing.value) return
-      isCodeReviewing.value = true
-      codeOutput.value = ''
-      const record = ensureStudioSession('codereview')
-      const runCtrl = beginStudioRun()
-      const langLabel = CODE_LANG_LABEL[codeLang.value] || codeLang.value
-      const prompt = `请对以下 ${langLabel} 代码进行全方位的架构与安全审查（Code Review）：\n\n` +
-        `\`\`\`${codeLang.value}\n${codeInput.value}\n\`\`\`\n\n` +
-        `请分析：\n` +
-        `1. ⚠️【潜在 Bug 与边界安全漏洞】；\n` +
-        `2. ⏱️【复杂度分析】（时间与空间复杂度）；\n` +
-        `3. 💡【重构与优化建议】；\n` +
-        `4. 🚀【高质量重构后代码】。`
+      await enqueueStudioTask('codereview', async (signal) => {
+        isCodeReviewing.value = true
+        codeOutput.value = ''
+        const record = ensureStudioSession('codereview')
+        const langLabel = CODE_LANG_LABEL[codeLang.value] || codeLang.value
+        const prompt = `请对以下 ${langLabel} 代码进行全方位的架构与安全审查（Code Review）：\n\n` +
+          `\`\`\`${codeLang.value}\n${codeInput.value}\n\`\`\`\n\n` +
+          `请分析：\n` +
+          `1. ⚠️【潜在 Bug 与边界安全漏洞】；\n` +
+          `2. ⏱️【复杂度分析】（时间与空间复杂度）；\n` +
+          `3. 💡【重构与优化建议】；\n` +
+          `4. 🚀【高质量重构后代码】。`
 
-      try {
-        const session = await ChromeAIService.createChatSession({
-          systemPrompt: 'You are a principal software engineer and security auditor.'
-        })
-        await ChromeAIService.streamPrompt(
-          session,
-          prompt,
-          ({ full }) => {
-            codeOutput.value = full
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        codeOutput.value = `> ⚠️ **代码审查失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: codeInput.value,
-          options: { lang: codeLang.value },
-          output: codeOutput.value,
-        })
-        isCodeReviewing.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+        try {
+          const session = await ChromeAIService.createChatSession({
+            systemPrompt: 'You are a principal software engineer and security auditor.'
+          })
+          await ChromeAIService.streamPrompt(
+            session,
+            prompt,
+            ({ full }) => {
+              codeOutput.value = full
+            },
+            signal
+          )
+        } catch (e) {
+          codeOutput.value = `> ⚠️ **代码审查失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: codeInput.value,
+            options: { lang: codeLang.value },
+            output: codeOutput.value,
+          })
+          isCodeReviewing.value = false
+        }
+      })
     }
 
     // 运行 Translate 学术翻译（优先端侧 Translator API，失败回退 Prompt API）
     async function runTranslate() {
       if (!translateInput.value.trim() || isTranslating.value) return
-      isTranslating.value = true
-      translateOutput.value = ''
-      const record = ensureStudioSession('translate')
-      const runCtrl = beginStudioRun()
-      try {
-        await ChromeAIService.translate(
-          translateInput.value,
-          {
-            sourceLanguage: translateSource.value,
-            targetLanguage: translateTarget.value,
-          },
-          (chunk) => {
-            translateOutput.value = chunk
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        translateOutput.value = `> ⚠️ **翻译失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: translateInput.value,
-          options: { from: translateSource.value, to: translateTarget.value },
-          output: translateOutput.value,
-        })
-        isTranslating.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+      await enqueueStudioTask('translate', async (signal) => {
+        isTranslating.value = true
+        translateOutput.value = ''
+        const record = ensureStudioSession('translate')
+        try {
+          await ChromeAIService.translate(
+            translateInput.value,
+            {
+              sourceLanguage: translateSource.value,
+              targetLanguage: translateTarget.value,
+            },
+            (chunk) => {
+              translateOutput.value = chunk
+            },
+            signal
+          )
+        } catch (e) {
+          translateOutput.value = `> ⚠️ **翻译失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: translateInput.value,
+            options: { from: translateSource.value, to: translateTarget.value },
+            output: translateOutput.value,
+          })
+          isTranslating.value = false
+        }
+      })
     }
 
     // 运行 Script Writer 脚本编写（Bash / BAT / PowerShell）
     async function runScript() {
       if (!scriptRequirement.value.trim() || isScripting.value) return
-      isScripting.value = true
-      scriptOutput.value = ''
-      const record = ensureStudioSession('script')
-      const runCtrl = beginStudioRun()
+      await enqueueStudioTask('script', async (signal) => {
+        isScripting.value = true
+        scriptOutput.value = ''
+        const record = ensureStudioSession('script')
 
-      const platformText = { bash: 'Linux / macOS 的 Bash', bat: 'Windows 批处理 BAT', powershell: 'Windows PowerShell' }[scriptType.value]
-      const commentRule = scriptNoComment.value
-        ? '4. 【重要】不要在脚本中写任何注释，包括行首 # / REM / :: 以及行尾注释；仅脚本代码块外的说明文字可以解释；'
-        : '4. 关键步骤加中文注释；'
-      const prompt = `请编写一段${platformText}脚本，满足以下需求：\n\n${scriptRequirement.value}\n\n` +
-        `要求：\n` +
-        `1. 直接给出完整可运行的脚本代码块（语言标记用 ${scriptType.value}）；\n` +
-        `2. 开启严格模式（Bash 用 set -euo pipefail；PowerShell 用 $ErrorActionPreference = "Stop"；BAT 用 @echo off 并显式判错）；\n` +
-        `3. 变量加引号、校验入参、处理路径含空格的情况；\n` +
-        commentRule + `\n` +
-        `5. 脚本后另起一节附「用法示例」与「前置依赖与注意事项」（这一节不属于脚本，不受上一条约束）。`
+        const platformText = { bash: 'Linux / macOS 的 Bash', bat: 'Windows 批处理 BAT', powershell: 'Windows PowerShell' }[scriptType.value]
+        const commentRule = scriptNoComment.value
+          ? '4. 【重要】不要在脚本中写任何注释，包括行首 # / REM / :: 以及行尾注释；仅脚本代码块外的说明文字可以解释；'
+          : '4. 关键步骤加中文注释；'
+        const prompt = `请编写一段${platformText}脚本，满足以下需求：\n\n${scriptRequirement.value}\n\n` +
+          `要求：\n` +
+          `1. 直接给出完整可运行的脚本代码块（语言标记用 ${scriptType.value}）；\n` +
+          `2. 开启严格模式（Bash 用 set -euo pipefail；PowerShell 用 $ErrorActionPreference = "Stop"；BAT 用 @echo off 并显式判错）；\n` +
+          `3. 变量加引号、校验入参、处理路径含空格的情况；\n` +
+          commentRule + `\n` +
+          `5. 脚本后另起一节附「用法示例」与「前置依赖与注意事项」（这一节不属于脚本，不受上一条约束）。`
 
-      try {
-        const session = await ChromeAIService.createChatSession({
-          systemPrompt: '你是一位资深 DevOps 与自动化运维工程师，精通 Bash、Windows 批处理与 PowerShell，编写的脚本必须安全、健壮、可直接运行。'
-        })
-        await ChromeAIService.streamPrompt(
-          session,
-          prompt,
-          ({ full }) => {
-            scriptOutput.value = full
-          },
-          runCtrl.signal
-        )
-      } catch (e) {
-        scriptOutput.value = `> ⚠️ **脚本生成失败**：${e.message}`
-      } finally {
-        persistStudioSession(record, {
-          input: scriptRequirement.value,
-          options: { type: scriptType.value },
-          output: scriptOutput.value,
-        })
-        isScripting.value = false
-        if (studioAbort.value === runCtrl) studioAbort.value = null
-      }
+        try {
+          const session = await ChromeAIService.createChatSession({
+            systemPrompt: '你是一位资深 DevOps 与自动化运维工程师，精通 Bash、Windows 批处理与 PowerShell，编写的脚本必须安全、健壮、可直接运行。'
+          })
+          await ChromeAIService.streamPrompt(
+            session,
+            prompt,
+            ({ full }) => {
+              scriptOutput.value = full
+            },
+            signal
+          )
+        } catch (e) {
+          scriptOutput.value = `> ⚠️ **脚本生成失败**：${e.message}`
+        } finally {
+          persistStudioSession(record, {
+            input: scriptRequirement.value,
+            options: { type: scriptType.value },
+            output: scriptOutput.value,
+          })
+          isScripting.value = false
+        }
+      })
     }
 
     // 端侧翻译实测状态
@@ -1614,11 +1661,15 @@ createApp({
       styleLabel,
       // Dictionary（单词查询）
       dictWord,
+      dictDetail,
+      toggleDictDetail,
       dictOutput,
       isDictRunning,
       dictHistory,
       runDictionary,
       lookupWord,
+      // 任务队列（供界面显示排队数）
+      studioQueue,
       // 代码换行
       wrapCode,
       // Outline

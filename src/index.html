@@ -528,7 +528,14 @@
         <div class="glass-card studio-card">
           <div class="studio-card-header">
             <span style="font-weight:600;font-size:0.95rem;">📖 查词</span>
-            <span style="font-size:0.74rem;color:var(--text-muted);">英汉双向 · 支持术语与缩写</span>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <label class="switch-label" title="勾选后额外输出音标、例句、搭配辨析与记忆提示">
+                <input v-model="dictDetail" type="checkbox" class="switch-input" @change="toggleDictDetail()">
+                <span class="switch-track"></span>
+                <span>更多</span>
+              </label>
+              <span style="font-size:0.74rem;color:var(--text-muted);">英汉双向</span>
+            </div>
           </div>
           <div class="studio-card-body" style="gap:12px;">
             <div style="display:flex;gap:8px;">
@@ -569,7 +576,7 @@
           <div class="studio-card-body">
             <div v-if="dictOutput" class="markdown-body" v-html="renderMarkdown(dictOutput)"></div>
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
-              释义、音标、例句、搭配与记忆提示将在此呈现
+              {{ dictDetail ? '释义、音标、例句、搭配与记忆提示将在此呈现' : '简明释义将在此呈现（勾选「更多」可展开音标、例句与搭配）' }}
             </div>
           </div>
         </div>
