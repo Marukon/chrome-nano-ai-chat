@@ -1,4 +1,7 @@
 {
+  "buildCommand": "node scripts/build.js",
+  "installCommand": "npm install --no-audit --no-fund",
+  "outputDirectory": "dist",
   "headers": [
     {
       "source": "/*",

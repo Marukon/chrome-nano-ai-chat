@@ -19,10 +19,9 @@
 
 ## 🚀 运行与部署指南
 
-> ⚠️ **必须先编译再部署**：仓库中**不再包含**根目录 `index.html` 与 `assets/css`、`assets/js` 下的业务产物（已在 `.gitignore` 中忽略）。
-> 任何环境（本地预览 / Nginx / EdgeOne / Cloudflare Pages 等）都必须先执行构建命令生成入口文件后才能访问。
+> ⚠️ **必须先编译再部署**：仓库中**不含任何可直接运行的页面**。所有产物由 `npm run build` 生成到 **`dist/`**（已在 `.gitignore` 中忽略）。
 
-### 第 0 步：编译生成入口文件（必做）
+### 第 0 步：编译（必做）
 
 ```bash
 # npm（唯一推荐，零第三方依赖）
@@ -31,37 +30,44 @@ npm run build
 # 等价直接调用
 node scripts/build.js
 
-# 仅清理产物，不构建
+# 仅清理 dist/，不构建
 npm run clean
 ```
 
-构建完成后会自动生成根目录 `index.html` 与带版本号的资源文件。
+构建产出自包含于 `dist/`，可直接托管：
 
-| 产物 | 示例文件名 |
-| --- | --- |
-| 样式表 | `assets/css/style.v1.1.0.3f9a2c1b.css` |
-| 主程序 | `assets/js/app.v1.1.0.3f9a2c1b.js` |
-| 模块 | `assets/js/chrome-ai.v1.1.0.3f9a2c1b.js` 等 |
+```
+dist/
+├── index.html
+├── favicon.ico、apple-touch-icon.png
+└── assets/
+    ├── css/style.v1.1.0.3f9a2c1b.css
+    ├── js/app.v1.1.0.3f9a2c1b.js（含 chrome-ai / presets / storage 模块）
+    ├── vendor/**  (Vue / marked / KaTeX / highlight.js，从 assets/vendor 复制)
+    └── manifest.json
+```
 
-命名规则为 `<name>.v<package.json 版本>.<8 位随机哈希>.<ext>`：版本号便于线上定位与回滚，随机哈希保证每次构建都是全新 URL、CDN 必然回源。版本清单写在 `assets/manifest.json`。
+命名规则为 `<name>.v<package.json 版本>.<8 位随机哈希>.<ext>`：版本号便于线上定位与回滚，随机哈希保证每次构建都是全新 URL、CDN 必然回源。
 
 > ⚠️ 构建仅支持 Node.js（`npm run build`）。项目已移除 Python 构建脚本——部分构建平台的 `python` 仍是 Python 2，无法运行。
 
 ### 方式一：使用任意静态服务器托管（推荐）
 
-构建完成后，将整个文件夹放到 Nginx、Caddy、Apache、EdgeOne、Cloudflare Pages 或宝塔面板上：
+构建完成后，只托管 `dist/` 这一个目录即可：
 
 ```nginx
-# Nginx 示例配置
+# Nginx 示例配置（root 指向 dist）
 server {
     listen 80;
     server_name your-domain.com;
-    root /path/to/chrome-nano-ai-chat;
+    root /path/to/chrome-nano-ai-chat/dist;
     index index.html;
 }
 ```
 
-> EdgeOne 等平台的构建命令请填写 `npm run build`，输出目录填仓库根目录。
+> **EdgeOne Pages**：构建命令 `npm run build`（或 `node scripts/build.js`）、输出目录 `dist`。
+> 这些值也已写在仓库根目录的 `edgeone.json`（`buildCommand` / `installCommand` / `outputDirectory`），平台会直接读取。
+> 安装命令不要用 `npm ci`——仓库没有 `package-lock.json`。
 
 ### 方式二：本地快速预览
 
@@ -71,7 +77,7 @@ npm run dev
 
 # 或先构建，再单独启动
 npm run build
-npx serve .
+npx serve dist
 ```
 
 然后在 Chrome 浏览器中访问 `http://localhost:8080` 即可。
@@ -86,16 +92,17 @@ EdgeOne 等现代 CDN 通常对静态资源（`.js` / `.css`）配置了较长�
 - **执行构建**：
   ```bash
   npm run build        # 等价于 node scripts/build.js
-  npm run clean        # 仅清理产物
+  npm run clean        # 仅清理 dist/
   ```
 - **自动处理**：
-  1. 清空上一次构建遗留的旧版本文件（避免历史哈希文件永久堆积）；
+  1. 清空上一次的 `dist/`（避免历史哈希文件永久堆积）；
   2. 读取 `package.json` 的版本号，并生成 8 位随机哈希，组合成版本标识（如 `v1.1.0.3f9a2c1b`）；
   3. 将业务 CSS/JS 输出为带版本号的文件名（如 `style.v1.1.0.3f9a2c1b.css`、`app.v1.1.0.3f9a2c1b.js`）；
   4. 自动解析并重写 `app.v1.1.0.3f9a2c1b.js` 内部的 ES 模块依赖导入路径；
-  5. 自动同步更新根目录 `index.html` 外部引用路径与 `assets/manifest.json` 版本清单。
+  5. 自动同步更新 `dist/index.html` 外部引用路径与 `dist/assets/manifest.json` 版本清单；
+  6. 复制自托管依赖 `assets/vendor/` 到 `dist/assets/vendor/`，并复制站点图标到 `dist/`。
 
-> 仓库中不包含任何静态产物，根目录 `index.html`、`assets/css/`、`assets/js/`、`assets/manifest.json` 均在 `.gitignore` 中，必须构建后才会出现。
+> 仓库中不包含任何静态产物，`dist/` 已在 `.gitignore` 中，必须构建后才会出现。
 
 ---
 

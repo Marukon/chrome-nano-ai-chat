@@ -1,12 +1,8 @@
 # ==========================================
-# 构建产物（必须通过 npm run build / python build.py 生成后才能部署）
+# 构建产物（必须通过 npm run build 生成）
+# 源码在 src/，自托管依赖在 assets/vendor/
 # ==========================================
-/index.html
-/favicon.ico
-/apple-touch-icon.png
-/assets/css/
-/assets/js/
-/assets/manifest.json
+/dist/
 
 # ==========================================
 # 依赖与编辑器
