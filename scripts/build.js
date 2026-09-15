@@ -109,19 +109,26 @@ function build() {
     console.log(`✅ 模块: dist/assets/js/${outName}`);
   }
 
-  // ---------- 3. 主程序 app.js（重写内部 ES 模块导入路径） ----------
-  let appContent = read(path.join(SRC_DIR, 'js', 'app.js'));
-  for (const [srcName, outName] of Object.entries(modules)) {
-    const base = srcName.replace(/\.js$/, '');
-    // 兼容形如 './chrome-ai.js' / './chrome-ai.<任意版本>.js'
-    appContent = appContent.replace(
-      new RegExp(`(['"])\\./${base}[^'"]*\\.js\\1`, 'g'),
-      `'./${outName}'`
-    );
-  }
+  // ---------- 3. 主程序 app.js ----------
   const outAppName = `app.${versionTag}.js`;
-  write(path.join(DIST_JS_DIR, outAppName), appContent);
+  write(path.join(DIST_JS_DIR, outAppName), read(path.join(SRC_DIR, 'js', 'app.js')));
   console.log(`✅ 主程序: dist/assets/js/${outAppName}`);
+
+  // ---------- 3.5 统一重写模块间引用（含 storage.js → presets.js） ----------
+  for (const outName of [...Object.values(modules), outAppName]) {
+    const filePath = path.join(DIST_JS_DIR, outName);
+    let content = read(filePath);
+    for (const [srcName, modOut] of Object.entries(modules)) {
+      const base = srcName.replace(/\.js$/, '');
+      // 兼容形如 './chrome-ai.js' / './chrome-ai.<任意版本>.js'
+      content = content.replace(
+        new RegExp(`(['"])\\./${base}[^'"]*\\.js\\1`, 'g'),
+        `'./${modOut}'`
+      );
+    }
+    write(filePath, content);
+  }
+  console.log(`✅ 模块引用重写完成`);
 
   // ---------- 4. 入口 index.html（重写外链） ----------
   let htmlContent = read(path.join(SRC_DIR, 'index.html'));

@@ -43,7 +43,7 @@
           :class="{ active: session.id === activeSessionId }"
           @click="selectSession(session.id)"
         >
-          <span class="session-title">{{ session.title || '未命名对话' }}</span>
+          <span class="session-title">{{ sessionIcon(session) }} {{ session.title || '未命名对话' }}</span>
           <div class="session-actions" @click.stop>
             <!-- 分支克隆 -->
             <button class="icon-button" style="width:24px;height:24px;border:none;background:transparent;" title="创建分支 (Clone)" @click="cloneSession(session)">
@@ -73,11 +73,6 @@
             <div class="progress-fill" :style="{ width: Math.min((currentTokensSoFar / maxTokensLimit) * 100, 100) + '%' }"></div>
           </div>
         </div>
-
-        <!-- 角色预设与设定 -->
-        <button class="btn-new-chat" style="margin:4px 0 0;background:rgba(125,125,125,0.08);color:var(--text-primary);border-color:var(--border-color);" title="切换全局角色设定（对自由对话与全部工具同时生效）" @click="roleModalOpen = true">
-          <span>{{ currentRole.avatar }} {{ currentRole.name }}</span>
-        </button>
       </div>
     </aside>
 
@@ -118,9 +113,9 @@
 
         <div class="nav-actions">
           <!-- 全局角色指示（对所有功能生效） -->
-          <div v-show="currentMode !== 'chat'" class="role-badge" title="当前全局角色设定，对自由对话与全部工具同时生效，点击切换" @click="roleModalOpen = true">
+          <div class="role-badge" title="当前全局角色设定：对自由对话与全部工具同时生效，点击切换" @click="roleModalOpen = true">
             <span>{{ currentRole.avatar }}</span>
-            <span>{{ currentRole.name }}</span>
+            <span class="role-name">{{ currentRole.name }}</span>
           </div>
 
           <!-- 端侧 AI 状态指示胶囊 -->
@@ -141,7 +136,7 @@
           </button>
 
           <!-- 导出按钮 -->
-          <button v-if="currentMode === 'chat' && activeSession" class="icon-button" title="导出当前会话为 Markdown" @click="exportSessionToMarkdown(activeSession)">
+          <button v-if="activeSession" class="icon-button" title="导出当前会话 / 工具结果为 Markdown" @click="exportSessionToMarkdown(activeSession)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           </button>
           <!-- 设置弹窗按钮 -->
@@ -240,7 +235,7 @@
             <div class="input-toolbar">
               <div class="role-badge" @click="roleModalOpen = true">
                 <span>{{ currentRole.avatar }}</span>
-                <span>{{ currentRole.name }}</span>
+                <span class="role-name">{{ currentRole.name }}</span>
               </div>
 
               <div style="display:flex;align-items:center;gap:8px;">
@@ -554,6 +549,10 @@
           <h3 style="font-size:1.1rem;font-weight:700;">🎭 切换学术与专业角色</h3>
           <button class="icon-button" style="width:28px;height:28px;" @click="roleModalOpen = false">✕</button>
         </div>
+        <p style="font-size:0.8rem;color:var(--text-secondary);margin:-8px 0 14px;line-height:1.6;">
+          角色 = 注入给端侧大模型的<b>系统提示词（人设与表达风格）</b>，对<b>自由对话与全部 6 个工具</b>同时生效。
+          每个会话会记住自己的角色；当前会话为空时切换角色直接沿用，否则为你新建一个会话。
+        </p>
         <div style="display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto;">
           <div
             v-for="role in ROLE_PRESETS"

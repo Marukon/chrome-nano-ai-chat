@@ -1,7 +1,7 @@
 import { createApp, ref, computed, watch, nextTick, onMounted } from '../vendor/vue.esm.js'
 import { marked } from '../vendor/marked.esm.js'
 import { ChromeAIService } from './chrome-ai.js'
-import { ROLE_PRESETS } from './presets.js'
+import { ROLE_PRESETS, MODE_META } from './presets.js'
 import {
   loadSessions,
   saveSessions,
@@ -159,6 +159,7 @@ createApp({
       const newSession = {
         id: `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         title: '新对话',
+        mode: 'chat',
         roleId: role.id,
         systemPrompt: role.systemPrompt,
         temperature: settings.value.temperature,
@@ -185,6 +186,14 @@ createApp({
       if (window.innerWidth <= 1024) sidebarOpen.value = false
       activeAiSession.value = null
       currentTokensSoFar.value = 0
+
+      // 工具记录：自动切回对应模式并回填输入/输出
+      const target = sessions.value.find(s => s.id === id)
+      if (target) {
+        const mode = target.mode || 'chat'
+        setMode(mode)
+        if (mode !== 'chat') restoreStudioFields(target)
+      }
       scrollToBottom(true)
     }
 
@@ -425,6 +434,7 @@ createApp({
       if (!summarizeInput.value.trim() || isSummarizing.value) return
       isSummarizing.value = true
       summarizeOutput.value = ''
+      const record = ensureStudioSession('summarizer')
       try {
         await ChromeAIService.summarize(
           summarizeInput.value,
@@ -441,6 +451,11 @@ createApp({
       } catch (e) {
         summarizeOutput.value = `> ⚠️ **摘要失败**：${e.message}`
       } finally {
+        persistStudioSession(record, {
+          input: summarizeInput.value,
+          options: { type: summarizeType.value, length: summarizeLength.value },
+          output: summarizeOutput.value,
+        })
         isSummarizing.value = false
       }
     }
@@ -450,6 +465,7 @@ createApp({
       if (!rewriteInput.value.trim() || isRewriting.value) return
       isRewriting.value = true
       rewriteOutput.value = ''
+      const record = ensureStudioSession('rewriter')
       try {
         await ChromeAIService.rewrite(
           rewriteInput.value,
@@ -465,6 +481,11 @@ createApp({
       } catch (e) {
         rewriteOutput.value = `> ⚠️ **润色失败**：${e.message}`
       } finally {
+        persistStudioSession(record, {
+          input: rewriteInput.value,
+          options: { tone: rewriteTone.value, length: rewriteLength.value },
+          output: rewriteOutput.value,
+        })
         isRewriting.value = false
       }
     }
@@ -474,6 +495,7 @@ createApp({
       if (!writePrompt.value.trim() || isWriting.value) return
       isWriting.value = true
       writeOutput.value = ''
+      const record = ensureStudioSession('writer')
       try {
         await ChromeAIService.write(
           writePrompt.value,
@@ -490,6 +512,12 @@ createApp({
       } catch (e) {
         writeOutput.value = `> ⚠️ **起草失败**：${e.message}`
       } finally {
+        persistStudioSession(record, {
+          prompt: writePrompt.value,
+          context: writeContext.value,
+          options: { tone: writeTone.value },
+          output: writeOutput.value,
+        })
         isWriting.value = false
       }
     }
@@ -505,6 +533,7 @@ createApp({
       if (!rebuttalComment.value.trim() || isRebutting.value) return
       isRebutting.value = true
       rebuttalOutput.value = ''
+      const record = ensureStudioSession('rebuttal')
       const prompt = `请作为国际顶级学术期刊与会议评审专家，为以下审稿人意见（Reviewer Comment）起草一份专业且具有说服力的 Point-by-Point 答辩信草稿：\n\n` +
         `【审稿人质疑/评审意见】：\n${rebuttalComment.value}\n\n` +
         (rebuttalResponse.value.trim() ? `【作者答辩要点与补充证据】：\n${rebuttalResponse.value}\n\n` : '') +
@@ -526,6 +555,12 @@ createApp({
       } catch (e) {
         rebuttalOutput.value = `> ⚠️ **生成答辩失败**：${e.message}`
       } finally {
+        persistStudioSession(record, {
+          comment: rebuttalComment.value,
+          response: rebuttalResponse.value,
+          options: { tone: rebuttalTone.value },
+          output: rebuttalOutput.value,
+        })
         isRebutting.value = false
       }
     }
@@ -540,6 +575,7 @@ createApp({
       if (!proofreadInput.value.trim() || isProofreading.value) return
       isProofreading.value = true
       proofreadOutput.value = ''
+      const record = ensureStudioSession('proofread')
       const prompt = `请对以下英文学术段落进行严苛的语法检查与审校（标准：${proofreadStandard.value === 'strict' ? '顶级期刊出版级严谨标准' : '简洁清晰自然表达'}）：\n\n` +
         `【待检查段落】：\n${proofreadInput.value}\n\n` +
         `请输出：\n` +
@@ -561,6 +597,11 @@ createApp({
       } catch (e) {
         proofreadOutput.value = `> ⚠️ **语法查错失败**：${e.message}`
       } finally {
+        persistStudioSession(record, {
+          input: proofreadInput.value,
+          options: { standard: proofreadStandard.value },
+          output: proofreadOutput.value,
+        })
         isProofreading.value = false
       }
     }
@@ -575,6 +616,7 @@ createApp({
       if (!codeInput.value.trim() || isCodeReviewing.value) return
       isCodeReviewing.value = true
       codeOutput.value = ''
+      const record = ensureStudioSession('codereview')
       const prompt = `请对以下 ${codeLang.value} 代码进行全方位的架构与安全审查（Code Review）：\n\n` +
         `\`\`\`${codeLang.value}\n${codeInput.value}\n\`\`\`\n\n` +
         `请分析：\n` +
@@ -598,6 +640,11 @@ createApp({
       } catch (e) {
         codeOutput.value = `> ⚠️ **代码审查失败**：${e.message}`
       } finally {
+        persistStudioSession(record, {
+          input: codeInput.value,
+          options: { lang: codeLang.value },
+          output: codeOutput.value,
+        })
         isCodeReviewing.value = false
       }
     }
@@ -622,6 +669,92 @@ createApp({
         translateTestState.value.error = err.message || '测试失败'
       } finally {
         translateTestState.value.running = false
+      }
+    }
+
+    /* ============================================================
+       工具（Studio）记录接入会话管理
+       ============================================================ */
+
+    // 会话列表图标：按模式取 emoji
+    function sessionIcon(session) {
+      return (MODE_META[session?.mode] || MODE_META.chat).icon
+    }
+
+    // 运行工具前准备记录：当前会话就是同模式的工具记录则复用，否则新建
+    function ensureStudioSession(mode) {
+      const meta = MODE_META[mode] || MODE_META.chat
+      let session = activeSession.value
+      if (!session || session.mode !== mode) {
+        session = {
+          id: `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          title: `${meta.icon} ${meta.label}`,
+          mode,
+          roleId: currentRole.value.id,
+          systemPrompt: currentRole.value.systemPrompt,
+          studio: {},
+          messages: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }
+        sessions.value.unshift(session)
+        activeSessionId.value = session.id
+        saveActiveSessionId(session.id)
+        if (window.innerWidth <= 1024) sidebarOpen.value = false
+      }
+      return session
+    }
+
+    // 运行结束后把输入/参数/输出写回会话并落盘
+    function persistStudioSession(session, data) {
+      if (!session) return
+      session.studio = data
+      session.updatedAt = Date.now()
+      const meta = MODE_META[session.mode] || MODE_META.chat
+      const raw = (data.input || data.prompt || data.comment || '').replace(/\s+/g, ' ').trim()
+      session.title = raw ? `${meta.icon} ${meta.label} · ${raw.slice(0, 16)}` : `${meta.icon} ${meta.label}`
+      saveSessions(sessions.value)
+    }
+
+    // 点击会话时把工具记录回填到对应面板
+    function restoreStudioFields(session) {
+      const s = session.studio || {}
+      const opt = s.options || {}
+      switch (session.mode) {
+        case 'summarizer':
+          summarizeInput.value = s.input || ''
+          if (opt.type) summarizeType.value = opt.type
+          if (opt.length) summarizeLength.value = opt.length
+          summarizeOutput.value = s.output || ''
+          break
+        case 'rewriter':
+          rewriteInput.value = s.input || ''
+          if (opt.tone) rewriteTone.value = opt.tone
+          if (opt.length) rewriteLength.value = opt.length
+          rewriteOutput.value = s.output || ''
+          break
+        case 'writer':
+          writePrompt.value = s.prompt || ''
+          writeContext.value = s.context || ''
+          if (opt.tone) writeTone.value = opt.tone
+          writeOutput.value = s.output || ''
+          break
+        case 'rebuttal':
+          rebuttalComment.value = s.comment || ''
+          rebuttalResponse.value = s.response || ''
+          if (opt.tone) rebuttalTone.value = opt.tone
+          rebuttalOutput.value = s.output || ''
+          break
+        case 'proofread':
+          proofreadInput.value = s.input || ''
+          if (opt.standard) proofreadStandard.value = opt.standard
+          proofreadOutput.value = s.output || ''
+          break
+        case 'codereview':
+          codeInput.value = s.input || ''
+          if (opt.lang) codeLang.value = opt.lang
+          codeOutput.value = s.output || ''
+          break
       }
     }
 
@@ -697,6 +830,8 @@ createApp({
       currentTokensSoFar,
       maxTokensLimit,
       renderMarkdown,
+      MODE_META,
+      sessionIcon,
       createNewSession,
       selectSession,
       deleteSession,

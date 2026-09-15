@@ -1,4 +1,17 @@
 /**
+ * 工作模式元数据（顶栏 Tabs、会话列表图标、导出标题共用）
+ */
+export const MODE_META = {
+  chat: { icon: '💬', label: '自由对话' },
+  summarizer: { icon: '📝', label: '论文摘要' },
+  rewriter: { icon: '✨', label: '学术润色' },
+  writer: { icon: '✍️', label: '辅助起草' },
+  rebuttal: { icon: '🛡️', label: '审稿答辩' },
+  proofread: { icon: '🔍', label: '语法纠错' },
+  codereview: { icon: '💻', label: '代码审查' },
+}
+
+/**
  * 预设系统角色提示词 (System Prompts)
  * 深度挖掘 Gemini Nano 端侧模型的学术与专业能力
  */
