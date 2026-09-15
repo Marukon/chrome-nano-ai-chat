@@ -322,10 +322,11 @@ body {
   background: rgba(125, 125, 125, 0.08);
   padding: 3px;
   border-radius: 10px;
-  overflow-x: auto;
   min-width: 0;
   max-width: 100%;
-  scrollbar-width: none;
+  /* 注意：不能用 overflow:auto，否则二级菜单会被裁切在容器内。
+     分组后条目很少（自由对话 + 3 个分组），无需横向滚动。 */
+  overflow: visible;
 }
 
 .nav-tabs::-webkit-scrollbar {
@@ -349,17 +350,76 @@ body {
   flex: 0 0 auto; /* 不允许被压缩，空间不足时由容器横向滚动 */
 }
 
-/* Tabs 左右两侧渐隐，提示还可横向滚动 */
-.nav-tabs.scrollable {
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
-  mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
-}
+
 
 .nav-tab.active {
   background: var(--bg-card);
   color: var(--text-primary);
   font-weight: 600;
   box-shadow: var(--shadow-sm);
+}
+
+/* 顶栏二级菜单 */
+.nav-group {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.tab-caret {
+  font-size: 0.7rem;
+  opacity: 0.6;
+  margin-left: 1px;
+}
+
+@media (max-width: 900px) {
+  .tab-caret {
+    display: none;
+  }
+}
+
+.nav-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 168px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.84rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.nav-dropdown-item:hover {
+  background: rgba(125, 125, 125, 0.12);
+  color: var(--text-primary);
+}
+
+.nav-dropdown-item.active {
+  background: var(--accent-light);
+  color: var(--accent-color);
+  font-weight: 600;
 }
 
 .nav-actions {
@@ -719,17 +779,20 @@ body {
   text-align: justify;
 }
 
-/* 欢迎页卡片 */
+/* 欢迎页卡片
+   注意：用 min-height 而非 height，内容超出时由 .chat-container 正常滚动，
+   避免 flex 居中导致顶部被裁切且滚不到的问题 */
 .hero-container {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  height: auto;
+  min-height: 100%;
   text-align: center;
   max-width: 640px;
   margin: 0 auto;
-  padding: 40px 20px;
+  padding: 40px 20px 24px;
   gap: 16px;
 }
 

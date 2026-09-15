@@ -239,6 +239,45 @@ export class ChromeAIService {
   }
 
   /**
+   * 文本翻译：优先使用原生 Translator API（端侧专用小模型）
+   * 若浏览器未提供或语言对不受支持，则自动回退到 Prompt API 流式生成
+   */
+  static async translate(text, options = {}, onChunk, signal) {
+    const { sourceLanguage = 'en', targetLanguage = 'zh' } = options
+
+    const TranslatorAPI = this.getTranslatorAPI()
+    if (TranslatorAPI) {
+      try {
+        let translator
+        if (typeof TranslatorAPI.create === 'function') {
+          translator = await TranslatorAPI.create({ sourceLanguage, targetLanguage })
+        } else if (typeof window.translation?.createTranslator === 'function') {
+          translator = await window.translation.createTranslator({ sourceLanguage, targetLanguage })
+        }
+        if (translator) {
+          const result = await translator.translate(text)
+          translator.destroy?.()
+          onChunk?.(result)
+          return result
+        }
+      } catch (e) {
+        console.warn('Translator API 调用失败，回退 Prompt API:', e)
+      }
+    }
+
+    // 回退：通用对话模型
+    const session = await this.createChatSession({
+      systemPrompt: '你是一位精通中英学术互译的专业译者。忠实原文不增删事实，使用目标语言的学术惯用表达，术语保持一致，保留原文的段落结构与逻辑连接词。只输出译文，不要任何解释或前后缀。'
+    })
+    return await this.streamPrompt(
+      session,
+      `请将以下文本从「${sourceLanguage}」翻译为「${targetLanguage}」，只输出译文：\n\n${text}`,
+      onChunk,
+      signal
+    )
+  }
+
+  /**
    * 创建多轮对话会话 (Prompt API)
    */
   static async createChatSession(options = {}) {

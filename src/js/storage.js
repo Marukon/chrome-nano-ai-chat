@@ -13,7 +13,6 @@ const DEFAULT_SETTINGS = {
   theme: 'auto', // 'auto' | 'light' | 'dark'
   temperature: 0.7,
   topK: 3,
-  autoScroll: true,
   defaultRole: 'general',
 }
 
@@ -46,7 +45,9 @@ export function loadSessions() {
       .filter(s => s && typeof s === 'object' && s.id)
       .map(s => ({
         ...s,
+        mode: s.mode || 'chat',
         messages: Array.isArray(s.messages) ? s.messages : [],
+        studio: s.studio && typeof s.studio === 'object' ? s.studio : undefined,
         title: s.title || '未命名对话',
         createdAt: s.createdAt || Date.now(),
         updatedAt: s.updatedAt || s.createdAt || Date.now(),
@@ -98,7 +99,16 @@ function exportStudioToMarkdown(session) {
   if (s.context) md += `## 📎 补充上下文\n\n${s.context}\n\n`
   if (s.input) md += `## 📥 输入内容\n\n${s.input}\n\n`
   if (s.options && Object.keys(s.options).length) {
-    md += `## 🎛️ 参数设置\n\n${Object.entries(s.options).map(([k, v]) => `- ${k}: ${v}`).join('\n')}\n\n`
+    // 参数 key 是英文，导出时补一层中文说明，便于阅读
+    const OPTION_LABELS = {
+      type: '类型', length: '长度', style: '输出形式', tone: '语气',
+      standard: '审校标准', lang: '代码语言', type_: '脚本类型',
+      from: '源语言', to: '目标语言',
+    }
+    const lines = Object.entries(s.options)
+      .map(([k, v]) => `- ${OPTION_LABELS[k] || k}: ${v}`)
+      .join('\n')
+    md += `## 🎛️ 参数设置\n\n${lines}\n\n`
   }
   md += `## 📤 输出结果\n\n${s.output || '（无输出）'}\n`
 

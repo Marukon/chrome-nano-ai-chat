@@ -85,39 +85,44 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
           </button>
 
-          <!-- 模式切换 Tabs（窄屏自动折叠为纯图标） -->
+          <!-- 模式切换：自由对话 + 三个功能分组（二级菜单） -->
           <nav class="nav-tabs">
             <button class="nav-tab" :class="{ active: currentMode === 'chat' }" @click="setMode('chat')" title="自由对话">
               <span class="tab-emoji">💬</span><span class="tab-label">自由对话</span>
             </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'summarizer' }" @click="setMode('summarizer')" title="论文摘要">
-              <span class="tab-emoji">📝</span><span class="tab-label">论文摘要</span>
-            </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'rewriter' }" @click="setMode('rewriter')" title="学术润色">
-              <span class="tab-emoji">✨</span><span class="tab-label">学术润色</span>
-            </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'writer' }" @click="setMode('writer')" title="辅助起草">
-              <span class="tab-emoji">✍️</span><span class="tab-label">辅助起草</span>
-            </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'rebuttal' }" @click="setMode('rebuttal')" title="审稿答辩">
-              <span class="tab-emoji">🛡️</span><span class="tab-label">审稿答辩</span>
-            </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'proofread' }" @click="setMode('proofread')" title="语法纠错">
-              <span class="tab-emoji">🔍</span><span class="tab-label">语法纠错</span>
-            </button>
-            <button class="nav-tab" :class="{ active: currentMode === 'codereview' }" @click="setMode('codereview')" title="代码审查">
-              <span class="tab-emoji">💻</span><span class="tab-label">代码审查</span>
-            </button>
+
+            <div
+              v-for="group in MODE_GROUPS"
+              :key="group.id"
+              class="nav-group"
+            >
+              <button
+                class="nav-tab"
+                :class="{ active: group.modes.includes(currentMode) }"
+                @click="toggleMenu(group.id)"
+                :title="group.label"
+              >
+                <span class="tab-emoji">{{ group.icon }}</span><span class="tab-label">{{ group.label }}</span>
+                <span class="tab-caret">▾</span>
+              </button>
+
+              <div v-if="openMenu === group.id" class="nav-dropdown">
+                <button
+                  v-for="m in group.modes"
+                  :key="m"
+                  class="nav-dropdown-item"
+                  :class="{ active: currentMode === m }"
+                  @click="setMode(m)"
+                >
+                  <span>{{ MODE_META[m].icon }}</span>
+                  <span>{{ MODE_META[m].label }}</span>
+                </button>
+              </div>
+            </div>
           </nav>
         </div>
 
         <div class="nav-actions">
-          <!-- 角色指示（仅自由对话生效，工具面板使用各自的专家提示词） -->
-          <div v-show="currentMode === 'chat'" class="role-badge" title="当前对话角色：仅对自由对话生效，点击切换" @click="roleModalOpen = true">
-            <span>{{ currentRole.avatar }}</span>
-            <span class="role-name">{{ currentRole.name }}</span>
-          </div>
-
           <!-- 端侧 AI 状态指示胶囊 -->
           <button
             class="status-pill"
@@ -294,6 +299,52 @@
             <div v-if="summarizeOutput" class="markdown-body" v-html="renderMarkdown(summarizeOutput)"></div>
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
               左侧输入文献后点击开始，摘要将实时在此流式呈现
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 模式 2.5：结构化萃取 (Extract) -->
+      <section v-if="currentMode === 'extract'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🧾 输入长篇文献 / 会议纪要</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <select v-model="extractStyle" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="table">Markdown 表格</option>
+                <option value="bullets">多级要点清单</option>
+              </select>
+            </div>
+          </div>
+          <div class="studio-card-body">
+            <textarea
+              v-model="extractInput"
+              class="studio-textarea"
+              placeholder="在此粘贴长篇文献、技术报告或会议讨论记录，端侧模型将萃取为结构化信息..."
+            ></textarea>
+            <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+              <button v-if="isExtracting" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!extractInput.trim()" @click="runExtract()">
+                <span>🚀 开始结构化萃取</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">📊 结构化萃取结果</span>
+            <button v-if="extractOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(extractOutput)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="extractOutput" class="markdown-body" v-html="renderMarkdown(extractOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              萃取出的动机 / 方法 / 基线 / 结果 / 局限将在此呈现
             </div>
           </div>
         </div>
@@ -503,6 +554,59 @@
         </div>
       </section>
 
+      <!-- 模式 8：学术翻译 (Translate) -->
+      <section v-if="currentMode === 'translate'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🌐 输入待翻译文本</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+              <select v-model="translateSource" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="en">英文</option>
+                <option value="zh">中文</option>
+                <option value="ja">日文</option>
+              </select>
+              <span style="color:var(--text-muted);font-size:0.85rem;">➜</span>
+              <select v-model="translateTarget" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="zh">中文</option>
+                <option value="en">英文</option>
+                <option value="ja">日文</option>
+              </select>
+            </div>
+          </div>
+          <div class="studio-card-body">
+            <textarea
+              v-model="translateInput"
+              class="studio-textarea"
+              placeholder="在此粘贴待翻译的学术段落。优先调用浏览器内置的端侧 Translator API（专用小模型），不支持时自动回退到通用对话模型..."
+            ></textarea>
+            <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+              <button v-if="isTranslating" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!translateInput.trim()" @click="runTranslate()">
+                <span>🚀 开始翻译</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">📄 译文结果</span>
+            <button v-if="translateOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(translateOutput)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="translateOutput" class="markdown-body" v-html="renderMarkdown(translateOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              译文将在此呈现
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- 模式 7：代码审查 (Code Review Studio) -->
       <section v-if="currentMode === 'codereview'" class="studio-container">
         <div class="glass-card studio-card">
@@ -513,9 +617,10 @@
                 <option value="python">Python</option>
                 <option value="javascript">JavaScript / TypeScript</option>
                 <option value="cpp">C / C++</option>
-                <option value="rust">Rust</option>
-                <option value="go">Go</option>
+                <option value="csharp">C#</option>
                 <option value="java">Java</option>
+                <option value="go">Go</option>
+                <option value="rust">Rust</option>
               </select>
             </div>
           </div>
@@ -555,6 +660,53 @@
       </section>
     </main>
 
+      <!-- 模式 9：脚本编写 (Script Writer) -->
+      <section v-if="currentMode === 'script'" class="studio-container">
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">🧩 描述你要的脚本</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <select v-model="scriptType" class="glass" style="padding:4px 8px;border-radius:8px;font-size:0.8rem;color:var(--text-primary);background:transparent;">
+                <option value="bash">Bash (Linux / macOS)</option>
+                <option value="bat">BAT 批处理 (Windows)</option>
+                <option value="powershell">PowerShell (Windows)</option>
+              </select>
+            </div>
+          </div>
+          <div class="studio-card-body">
+            <textarea
+              v-model="scriptRequirement"
+              class="studio-textarea"
+              placeholder="例如：遍历当前目录下所有 .log 文件，压缩 7 天前的日志到 archive/ 目录，并删除原文件；需要支持传入目录参数，出错立即退出..."
+            ></textarea>
+            <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+              <button v-if="isScripting" class="btn-new-chat danger" style="margin:0;" title="停止生成" @click="stopStudio()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                <span>停止生成</span>
+              </button>
+              <button v-else class="btn-new-chat" style="margin:0;" :disabled="!scriptRequirement.trim()" @click="runScript()">
+                <span>🚀 生成脚本</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card studio-card">
+          <div class="studio-card-header">
+            <span style="font-weight:600;font-size:0.95rem;">📜 脚本与用法说明</span>
+            <button v-if="scriptOutput" class="icon-button" style="width:28px;height:28px;" title="复制结果" @click="copyToClipboard(scriptOutput)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+          <div class="studio-card-body">
+            <div v-if="scriptOutput" class="markdown-body" v-html="renderMarkdown(scriptOutput)"></div>
+            <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.9rem;">
+              生成的可运行脚本、用法示例与注意事项将在此呈现
+            </div>
+          </div>
+        </div>
+      </section>
+
     <!-- 角色预设切换弹窗 -->
     <div v-if="roleModalOpen" class="modal-backdrop" @click.self="roleModalOpen = false">
       <div class="modal-content glass-card" style="padding:24px;">
@@ -567,20 +719,27 @@
           论文摘要、润色等工具使用各自内置的专家提示词，不受角色影响。
           每个会话会记住自己的角色；当前会话为空时切换角色直接沿用，否则为你新建一个会话。
         </p>
-        <div style="display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto;">
-          <div
-            v-for="role in ROLE_PRESETS"
-            :key="role.id"
-            class="session-item"
-            :class="{ active: currentRole.id === role.id }"
-            style="padding:12px 14px;border-radius:12px;"
-            @click="applyRole(role.id)"
-          >
-            <div style="display:flex;align-items:center;gap:12px;">
-              <span style="font-size:1.4rem;">{{ role.avatar }}</span>
-              <div>
-                <div style="font-weight:600;font-size:0.9rem;">{{ role.name }}</div>
-                <div style="font-size:0.78rem;color:var(--text-muted);">{{ role.desc }}</div>
+        <div style="display:flex;flex-direction:column;gap:14px;max-height:60vh;overflow-y:auto;">
+          <div v-for="group in ROLE_GROUPS" :key="group.id">
+            <div v-if="rolesInGroup(group.id).length" style="font-size:0.76rem;font-weight:700;color:var(--text-muted);margin:0 0 6px 4px;letter-spacing:0.04em;">
+              {{ group.icon }} {{ group.label }}
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <div
+                v-for="role in rolesInGroup(group.id)"
+                :key="role.id"
+                class="session-item"
+                :class="{ active: currentRole.id === role.id }"
+                style="padding:10px 14px;border-radius:12px;"
+                @click="applyRole(role.id)"
+              >
+                <div style="display:flex;align-items:center;gap:12px;">
+                  <span style="font-size:1.3rem;">{{ role.avatar }}</span>
+                  <div style="min-width:0;">
+                    <div style="font-weight:600;font-size:0.88rem;">{{ role.name }}</div>
+                    <div style="font-size:0.76rem;color:var(--text-muted);">{{ role.desc }}</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

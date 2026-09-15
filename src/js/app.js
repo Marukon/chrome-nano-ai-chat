@@ -1,7 +1,18 @@
 import { createApp, ref, computed, watch, nextTick, onMounted } from '../vendor/vue.esm.js'
 import { marked } from '../vendor/marked.esm.js'
 import { ChromeAIService } from './chrome-ai.js'
-import { ROLE_PRESETS, MODE_META } from './presets.js'
+import { ROLE_PRESETS, ROLE_GROUPS, MODE_META, MODE_GROUPS } from './presets.js'
+
+// 代码审查语言的显示名称
+const CODE_LANG_LABEL = {
+  python: 'Python',
+  javascript: 'JavaScript / TypeScript',
+  cpp: 'C / C++',
+  csharp: 'C#',
+  java: 'Java',
+  go: 'Go',
+  rust: 'Rust',
+}
 import {
   loadSessions,
   saveSessions,
@@ -35,6 +46,7 @@ createApp({
     const sidebarOpen = ref(window.innerWidth > 1024)
     const settingsModalOpen = ref(false)
     const roleModalOpen = ref(false)
+    const openMenu = ref('') // 顶栏二级菜单：当前展开的分组 id
 
     // AI 就绪状态
     const aiStatus = ref({
@@ -65,6 +77,12 @@ createApp({
     const summarizeLength = ref('medium')
     const summarizeFormat = ref('markdown')
     const isSummarizing = ref(false)
+
+    // 结构化萃取 (Extract) 模式状态
+    const extractInput = ref('')
+    const extractStyle = ref('table') // 'table' | 'bullets'
+    const extractOutput = ref('')
+    const isExtracting = ref(false)
 
     // Rewriter 模式状态
     const rewriteInput = ref('')
@@ -102,11 +120,14 @@ createApp({
         studioAbort.value = null
       }
       isSummarizing.value = false
+      isExtracting.value = false
       isRewriting.value = false
       isWriting.value = false
       isRebutting.value = false
       isProofreading.value = false
+      isTranslating.value = false
       isCodeReviewing.value = false
+      isScripting.value = false
     }
 
     // Markdown 解析与 LaTeX 公式渲染器
@@ -162,11 +183,18 @@ createApp({
     // 切换模式
     function setMode(mode) {
       currentMode.value = mode
+      openMenu.value = ''
+    }
+
+    // 展开/收起顶栏二级菜单
+    function toggleMenu(groupId) {
+      openMenu.value = openMenu.value === groupId ? '' : groupId
     }
 
     // 新建会话
-    function createNewSession(roleId = settings.value.defaultRole) {
-      const role = ROLE_PRESETS.find(r => r.id === roleId) || ROLE_PRESETS[0]
+    function createNewSession(roleId) {
+      const targetRoleId = roleId || settings.value.defaultRole || 'general'
+      const role = ROLE_PRESETS.find(r => r.id === targetRoleId) || ROLE_PRESETS[0]
       const newSession = {
         id: `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         title: '新对话',
@@ -433,14 +461,21 @@ createApp({
       createNewSession(role.id)
     }
 
-    // 欢迎页「从角色开始」的精选角色
+    // 角色弹窗：按分组取角色
+    function rolesInGroup(groupId) {
+      return ROLE_PRESETS.filter(r => (r.group || 'general') === groupId)
+    }
+
+    // 欢迎页「从角色开始」的精选角色（覆盖论文、语言、工程、学习等不同维度）
     const HERO_ROLE_IDS = [
-      'sci-reviewer',
-      'academic-editor',
-      'feynman-tutor',
-      'math-derivation',
-      'code-architect',
-      'academic-mentor',
+      'sci-reviewer',      // 论文评审
+      'rebuttal-expert',   // 审稿答辩
+      'academic-editor',   // 学术英语
+      'translator-pro',    // 学术翻译
+      'code-architect',    // 代码架构
+      'devops-script',     // 脚本自动化
+      'feynman-tutor',     // 费曼讲解
+      'math-derivation',   // 公式推导
     ]
     const quickRoles = computed(() =>
       HERO_ROLE_IDS
@@ -460,13 +495,32 @@ createApp({
       showToast(`已切换为「${role.name}」，直接输入问题即可`)
     }
 
+    // 开始新的工具运行前，中断上一个仍在跑的生成，避免共用 studioAbort 时
+    // 旧任务的 finally 把新任务的状态一并清掉（停止按钮"点了没反应"）
+    function beginStudioRun() {
+      if (studioAbort.value) {
+        try { studioAbort.value.abort() } catch (e) {}
+        isSummarizing.value = false
+        isExtracting.value = false
+        isRewriting.value = false
+        isWriting.value = false
+        isRebutting.value = false
+        isProofreading.value = false
+        isTranslating.value = false
+        isCodeReviewing.value = false
+        isScripting.value = false
+      }
+      studioAbort.value = new AbortController()
+      return studioAbort.value
+    }
+
     // 运行 Summarizer 模式
     async function runSummarizer() {
       if (!summarizeInput.value.trim() || isSummarizing.value) return
       isSummarizing.value = true
       summarizeOutput.value = ''
       const record = ensureStudioSession('summarizer')
-      studioAbort.value = new AbortController()
+      const runCtrl = beginStudioRun()
       try {
         await ChromeAIService.summarize(
           summarizeInput.value,
@@ -489,7 +543,47 @@ createApp({
           output: summarizeOutput.value,
         })
         isSummarizing.value = false
-        studioAbort.value = null
+        if (studioAbort.value === runCtrl) studioAbort.value = null
+      }
+    }
+
+    // 运行 Extract 结构化萃取
+    async function runExtract() {
+      if (!extractInput.value.trim() || isExtracting.value) return
+      isExtracting.value = true
+      extractOutput.value = ''
+      const record = ensureStudioSession('extract')
+      const runCtrl = beginStudioRun()
+      const styleText = extractStyle.value === 'table'
+        ? '请以 Markdown 表格输出，表头自行根据内容确定'
+        : '请以多级要点清单输出'
+      const prompt = `请将以下长文本萃取为结构化信息。${styleText}。\n\n` +
+        `必须覆盖这些维度（原文没有的标注 N/A）：研究动机 Motivation、核心方法 Method、` +
+        `数据集与基线 Datasets & Baselines、量化结果 Results、局限性 Limitations。\n\n` +
+        `【待萃取文本】：\n${extractInput.value}`
+
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: '你是一位高效的信息萃取与文献分析专家，只输出结构化结果，不要复述原文。'
+        })
+        await ChromeAIService.streamPrompt(
+          session,
+          prompt,
+          ({ full }) => {
+            extractOutput.value = full
+          },
+          studioAbort.value.signal
+        )
+      } catch (e) {
+        extractOutput.value = `> ⚠️ **萃取失败**：${e.message}`
+      } finally {
+        persistStudioSession(record, {
+          input: extractInput.value,
+          options: { style: extractStyle.value },
+          output: extractOutput.value,
+        })
+        isExtracting.value = false
+        if (studioAbort.value === runCtrl) studioAbort.value = null
       }
     }
 
@@ -499,7 +593,7 @@ createApp({
       isRewriting.value = true
       rewriteOutput.value = ''
       const record = ensureStudioSession('rewriter')
-      studioAbort.value = new AbortController()
+      const runCtrl = beginStudioRun()
       try {
         await ChromeAIService.rewrite(
           rewriteInput.value,
@@ -521,7 +615,7 @@ createApp({
           output: rewriteOutput.value,
         })
         isRewriting.value = false
-        studioAbort.value = null
+        if (studioAbort.value === runCtrl) studioAbort.value = null
       }
     }
 
@@ -531,7 +625,7 @@ createApp({
       isWriting.value = true
       writeOutput.value = ''
       const record = ensureStudioSession('writer')
-      studioAbort.value = new AbortController()
+      const runCtrl = beginStudioRun()
       try {
         await ChromeAIService.write(
           writePrompt.value,
@@ -555,7 +649,7 @@ createApp({
           output: writeOutput.value,
         })
         isWriting.value = false
-        studioAbort.value = null
+        if (studioAbort.value === runCtrl) studioAbort.value = null
       }
     }
 
@@ -571,7 +665,7 @@ createApp({
       isRebutting.value = true
       rebuttalOutput.value = ''
       const record = ensureStudioSession('rebuttal')
-      studioAbort.value = new AbortController()
+      const runCtrl = beginStudioRun()
       const prompt = `请作为国际顶级学术期刊与会议评审专家，为以下审稿人意见（Reviewer Comment）起草一份专业且具有说服力的 Point-by-Point 答辩信草稿：\n\n` +
         `【审稿人质疑/评审意见】：\n${rebuttalComment.value}\n\n` +
         (rebuttalResponse.value.trim() ? `【作者答辩要点与补充证据】：\n${rebuttalResponse.value}\n\n` : '') +
@@ -600,7 +694,7 @@ createApp({
           output: rebuttalOutput.value,
         })
         isRebutting.value = false
-        studioAbort.value = null
+        if (studioAbort.value === runCtrl) studioAbort.value = null
       }
     }
 
@@ -615,7 +709,7 @@ createApp({
       isProofreading.value = true
       proofreadOutput.value = ''
       const record = ensureStudioSession('proofread')
-      studioAbort.value = new AbortController()
+      const runCtrl = beginStudioRun()
       const prompt = `请对以下英文学术段落进行严苛的语法检查与审校（标准：${proofreadStandard.value === 'strict' ? '顶级期刊出版级严谨标准' : '简洁清晰自然表达'}）：\n\n` +
         `【待检查段落】：\n${proofreadInput.value}\n\n` +
         `请输出：\n` +
@@ -643,9 +737,22 @@ createApp({
           output: proofreadOutput.value,
         })
         isProofreading.value = false
-        studioAbort.value = null
+        if (studioAbort.value === runCtrl) studioAbort.value = null
       }
     }
+
+    // 模式 8：翻译 (Translate)
+    const translateInput = ref('')
+    const translateSource = ref('en')
+    const translateTarget = ref('zh')
+    const translateOutput = ref('')
+    const isTranslating = ref(false)
+
+    // 模式 9：脚本编写 (Script Writer)
+    const scriptRequirement = ref('')
+    const scriptType = ref('bash') // 'bash' | 'bat' | 'powershell'
+    const scriptOutput = ref('')
+    const isScripting = ref(false)
 
     // 模式 7：CodeReview 代码审查与重构状态
     const codeInput = ref('')
@@ -658,8 +765,9 @@ createApp({
       isCodeReviewing.value = true
       codeOutput.value = ''
       const record = ensureStudioSession('codereview')
-      studioAbort.value = new AbortController()
-      const prompt = `请对以下 ${codeLang.value} 代码进行全方位的架构与安全审查（Code Review）：\n\n` +
+      const runCtrl = beginStudioRun()
+      const langLabel = CODE_LANG_LABEL[codeLang.value] || codeLang.value
+      const prompt = `请对以下 ${langLabel} 代码进行全方位的架构与安全审查（Code Review）：\n\n` +
         `\`\`\`${codeLang.value}\n${codeInput.value}\n\`\`\`\n\n` +
         `请分析：\n` +
         `1. ⚠️【潜在 Bug 与边界安全漏洞】；\n` +
@@ -688,7 +796,81 @@ createApp({
           output: codeOutput.value,
         })
         isCodeReviewing.value = false
-        studioAbort.value = null
+        if (studioAbort.value === runCtrl) studioAbort.value = null
+      }
+    }
+
+    // 运行 Translate 学术翻译（优先端侧 Translator API，失败回退 Prompt API）
+    async function runTranslate() {
+      if (!translateInput.value.trim() || isTranslating.value) return
+      isTranslating.value = true
+      translateOutput.value = ''
+      const record = ensureStudioSession('translate')
+      const runCtrl = beginStudioRun()
+      try {
+        await ChromeAIService.translate(
+          translateInput.value,
+          {
+            sourceLanguage: translateSource.value,
+            targetLanguage: translateTarget.value,
+          },
+          (chunk) => {
+            translateOutput.value = chunk
+          },
+          studioAbort.value.signal
+        )
+      } catch (e) {
+        translateOutput.value = `> ⚠️ **翻译失败**：${e.message}`
+      } finally {
+        persistStudioSession(record, {
+          input: translateInput.value,
+          options: { from: translateSource.value, to: translateTarget.value },
+          output: translateOutput.value,
+        })
+        isTranslating.value = false
+        if (studioAbort.value === runCtrl) studioAbort.value = null
+      }
+    }
+
+    // 运行 Script Writer 脚本编写（Bash / BAT / PowerShell）
+    async function runScript() {
+      if (!scriptRequirement.value.trim() || isScripting.value) return
+      isScripting.value = true
+      scriptOutput.value = ''
+      const record = ensureStudioSession('script')
+      const runCtrl = beginStudioRun()
+
+      const platformText = { bash: 'Linux / macOS 的 Bash', bat: 'Windows 批处理 BAT', powershell: 'Windows PowerShell' }[scriptType.value]
+      const prompt = `请编写一段${platformText}脚本，满足以下需求：\n\n${scriptRequirement.value}\n\n` +
+        `要求：\n` +
+        `1. 直接给出完整可运行的脚本代码块（语言标记用 ${scriptType.value}）；\n` +
+        `2. 开启严格模式（Bash 用 set -euo pipefail；PowerShell 用 $ErrorActionPreference = "Stop"；BAT 用 @echo off 并显式判错）；\n` +
+        `3. 变量加引号、校验入参、处理路径含空格的情况；\n` +
+        `4. 关键步骤加中文注释，必要时给出幂等与错误处理；\n` +
+        `5. 脚本后附「用法示例」与「前置依赖与注意事项」。`
+
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: '你是一位资深 DevOps 与自动化运维工程师，精通 Bash、Windows 批处理与 PowerShell，编写的脚本必须安全、健壮、可直接运行。'
+        })
+        await ChromeAIService.streamPrompt(
+          session,
+          prompt,
+          ({ full }) => {
+            scriptOutput.value = full
+          },
+          runCtrl.signal
+        )
+      } catch (e) {
+        scriptOutput.value = `> ⚠️ **脚本生成失败**：${e.message}`
+      } finally {
+        persistStudioSession(record, {
+          input: scriptRequirement.value,
+          options: { type: scriptType.value },
+          output: scriptOutput.value,
+        })
+        isScripting.value = false
+        if (studioAbort.value === runCtrl) studioAbort.value = null
       }
     }
 
@@ -768,6 +950,11 @@ createApp({
           if (opt.length) summarizeLength.value = opt.length
           summarizeOutput.value = s.output || ''
           break
+        case 'extract':
+          extractInput.value = s.input || ''
+          if (opt.style) extractStyle.value = opt.style
+          extractOutput.value = s.output || ''
+          break
         case 'rewriter':
           rewriteInput.value = s.input || ''
           if (opt.tone) rewriteTone.value = opt.tone
@@ -795,6 +982,17 @@ createApp({
           codeInput.value = s.input || ''
           if (opt.lang) codeLang.value = opt.lang
           codeOutput.value = s.output || ''
+          break
+        case 'translate':
+          translateInput.value = s.input || ''
+          if (opt.from) translateSource.value = opt.from
+          if (opt.to) translateTarget.value = opt.to
+          translateOutput.value = s.output || ''
+          break
+        case 'script':
+          scriptRequirement.value = s.input || ''
+          if (opt.type) scriptType.value = opt.type
+          scriptOutput.value = s.output || ''
           break
       }
     }
@@ -825,6 +1023,12 @@ createApp({
 
       checkSystemAI()
 
+      // 点击顶栏菜单外部时收起二级菜单
+      document.addEventListener('click', (e) => {
+        if (typeof e.target?.closest === 'function' && e.target.closest('.nav-group')) return
+        openMenu.value = ''
+      })
+
       // 视口跨越 1024px 断点时，自动切换侧边栏形态（展开 / 收起抽屉）
       let lastIsWide = window.innerWidth > 1024
       window.addEventListener('resize', () => {
@@ -854,6 +1058,7 @@ createApp({
       settingsModalOpen,
       roleModalOpen,
       ROLE_PRESETS,
+      rolesInGroup,
       currentRole,
       aiStatus,
       checkSystemAI,
@@ -872,6 +1077,10 @@ createApp({
       maxTokensLimit,
       renderMarkdown,
       MODE_META,
+      MODE_GROUPS,
+      ROLE_GROUPS,
+      openMenu,
+      toggleMenu,
       sessionIcon,
       createNewSession,
       selectSession,
@@ -896,6 +1105,12 @@ createApp({
       summarizeLength,
       isSummarizing,
       runSummarizer,
+      // Extract
+      extractInput,
+      extractStyle,
+      extractOutput,
+      isExtracting,
+      runExtract,
       // Rewriter
       rewriteInput,
       rewriteOutput,
@@ -931,6 +1146,19 @@ createApp({
       codeOutput,
       isCodeReviewing,
       runCodeReview,
+      // Translate
+      translateInput,
+      translateSource,
+      translateTarget,
+      translateOutput,
+      isTranslating,
+      runTranslate,
+      // Script
+      scriptRequirement,
+      scriptType,
+      scriptOutput,
+      isScripting,
+      runScript,
     }
   }
 }).mount('#app')
