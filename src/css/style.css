@@ -428,6 +428,8 @@ body {
 }
 
 .nav-tab {
+  position: relative;
+  z-index: 1; /* 高于 .nav-group::before 的悬停热区，保证点击不被遮挡 */
   padding: 5px 9px;
   border-radius: 8px;
   border: none;
@@ -453,11 +455,23 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
-/* 顶栏二级菜单 */
+/* 顶栏二级菜单
+   用 ::before 向四周外扩 6px 悬停热区，避免鼠标恰好落在
+   按钮边缘或与相邻分组之间的缝隙时 hover 不触发 */
 .nav-group {
   position: relative;
   display: flex;
   flex: 0 0 auto;
+}
+
+.nav-group::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  left: -3px;
+  right: -3px;
+  z-index: 0;
 }
 
 .tab-caret {
