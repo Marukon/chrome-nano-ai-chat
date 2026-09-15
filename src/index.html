@@ -123,19 +123,21 @@
         </div>
 
         <div class="nav-actions">
-          <!-- 端侧 AI 状态指示胶囊 -->
+          <!-- 端侧 AI 状态指示胶囊：检测中不写文字，避免"待配置 → ✓"的跳变闪烁 -->
           <button
             class="status-pill"
             :class="{
+              'checking': aiStatus.prompt === 'checking',
               'ready': aiStatus.prompt === 'available',
-              'warn': aiStatus.prompt !== 'available' && (aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'),
-              'unavail': aiStatus.prompt !== 'available' && !(aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available')
+              'warn': aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && (aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'),
+              'unavail': aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && !(aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available')
             }"
-            title="点击查看端侧模型诊断与开启指引"
+            :title="aiStatus.prompt === 'checking' ? '正在检测端侧模型…' : '点击查看端侧模型诊断与开启指引'"
             @click="settingsModalOpen = true"
           >
             <span class="status-dot"></span>
-            <span v-if="aiStatus.prompt === 'available'" class="status-check">✓</span>
+            <span v-if="aiStatus.prompt === 'checking'" class="status-skeleton"></span>
+            <span v-else-if="aiStatus.prompt === 'available'" class="status-check">✓</span>
             <span v-else-if="aiStatus.detectedAPIs?.Translator || aiStatus.translator === 'available'">仅翻译</span>
             <span v-else>待配置</span>
           </button>
@@ -166,8 +168,8 @@
               基于 W3C 标准 Prompt API 规范。全面支持 <b>Google Chrome (Gemini Nano)</b> 与 <b>Microsoft Edge (Phi-4-mini / Phi-Silica)</b>。100% 本地算力，0ms 网络延迟，零 API Key 消耗，隐私安全无忧。
             </p>
 
-            <!-- 环境诊断提示横幅 (若 Prompt 未就绪) -->
-            <div v-if="aiStatus.prompt !== 'available'" class="hero-alert-banner" @click="settingsModalOpen = true">
+            <!-- 环境诊断提示横幅（检测完成后、且模型确实未就绪才出现，避免闪现） -->
+            <div v-if="aiStatus.prompt !== 'available' && aiStatus.prompt !== 'checking' && aiStatus.prompt !== 'downloadable'" class="hero-alert-banner" @click="settingsModalOpen = true">
               <span style="font-size:1.2rem;">💡</span>
               <div style="text-align:left;flex:1;">
                 <div style="font-weight:600;font-size:0.88rem;">检测到端侧对话大模型待开启</div>

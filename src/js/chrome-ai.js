@@ -79,7 +79,7 @@ export class ChromeAIService {
     if (typeof window.LanguageDetector !== 'undefined') {
       return window.LanguageDetector
     }
-    if (typeof window.translation?.createDetector !== 'undefined') {
+    if (typeof window.translation?.createDetector === 'function') {
       return window.translation
     }
     if (typeof window.ai !== 'undefined' && window.ai?.languageDetector) {
@@ -93,7 +93,8 @@ export class ChromeAIService {
    */
   static async checkStatus() {
     const status = {
-      prompt: 'unavailable',
+      // checking = 尚未得出结果，UI 据此显示「检测中」而不是先亮一下「待配置」
+      prompt: 'checking',
       summarizer: 'unavailable',
       rewriter: 'unavailable',
       writer: 'unavailable',
@@ -138,11 +139,13 @@ export class ChromeAIService {
         } else if (avail === 'no' || avail === 'unavailable') {
           status.prompt = 'unavailable'
         } else {
-          status.prompt = 'available'
+          // 出现了标准之外的新状态值，保持 pending 让用户点击自检，不再谎报可用
+          status.prompt = 'downloadable'
         }
       } catch (e) {
         console.warn('LanguageModel check error:', e)
-        status.prompt = 'available'
+        // 检测失败时不再乐观置为 available（旧代码会显示 ✓ 却发不出消息）
+        status.prompt = 'unavailable'
       }
     }
 

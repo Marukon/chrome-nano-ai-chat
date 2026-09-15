@@ -175,10 +175,19 @@ createApp({
       }
     }
 
-    // 初始化检查 AI 支持
-    async function checkSystemAI() {
-      const status = await ChromeAIService.checkStatus()
-      aiStatus.value = status
+    // 初始化检查 AI 支持（单例：避免多处并发触发重复检测与状态抖动）
+    let statusPromise = null
+    function checkSystemAI() {
+      if (statusPromise) return statusPromise
+      statusPromise = ChromeAIService.checkStatus()
+        .then(status => {
+          aiStatus.value = status
+          return status
+        })
+        .finally(() => {
+          statusPromise = null
+        })
+      return statusPromise
     }
 
     // 切换模式
