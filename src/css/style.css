@@ -1002,6 +1002,208 @@ body {
   background: currentColor;
 }
 
+/* ===== 端侧模型检测：按钮动画 + 浮动报告面板 ===== */
+
+.diag-anchor {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+}
+
+/* 检测中的环形旋转指示器 */
+.status-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: spinner-rotate 0.7s linear infinite;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+@keyframes spinner-rotate {
+  to { transform: rotate(360deg); }
+}
+
+/* 展开状态下按钮加深，形成"按下"感 */
+.status-pill.open {
+  background: rgba(125, 125, 125, 0.16);
+  color: var(--text-primary);
+}
+
+/* 浮动报告面板 */
+.diag-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  border-radius: 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  z-index: 80;
+  overflow: hidden;
+}
+
+.diag-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.diag-panel-body {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(60vh, 460px);
+  overflow-y: auto;
+}
+
+.diag-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(125, 125, 125, 0.06);
+}
+
+.diag-row-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.diag-row-sub {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.diag-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.diag-badge.ok {
+  color: #16a34a;
+  background: rgba(34, 197, 94, 0.13);
+}
+
+.diag-badge.part {
+  color: #ca8a04;
+  background: rgba(234, 179, 8, 0.15);
+}
+
+.diag-badge.off {
+  color: var(--text-muted);
+  background: rgba(125, 125, 125, 0.13);
+}
+
+.diag-badge.checking {
+  color: var(--text-secondary);
+  background: rgba(125, 125, 125, 0.13);
+  animation: skeleton-breathe 1.1s ease-in-out infinite;
+}
+
+.diag-test {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.diag-result {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.diag-result.ok {
+  background: rgba(34, 197, 94, 0.09);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--text-primary);
+}
+
+.diag-result.err {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #ef4444;
+}
+
+.diag-tip {
+  font-size: 0.74rem;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.22);
+}
+
+.diag-tip code {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(125, 125, 125, 0.16);
+}
+
+.diag-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.diag-mini-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(125, 125, 125, 0.1);
+}
+
+.diag-mini-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 浮层弹出动画 */
+.diag-pop-enter-active,
+.diag-pop-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.diag-pop-enter-from,
+.diag-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+}
+
+@media (max-width: 640px) {
+  .diag-panel {
+    width: 300px;
+  }
+}
+
 /* 检测中：只显示呼吸的骨架条，避免文案跳变 */
 .status-pill.checking {
   background: rgba(125, 125, 125, 0.08);

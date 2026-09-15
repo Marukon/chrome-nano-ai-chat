@@ -46,7 +46,40 @@ createApp({
     // 窄屏（≤1024px）侧边栏为抽屉模式，默认收起；宽屏默认展开
     const sidebarOpen = ref(window.innerWidth > 1024)
     const settingsModalOpen = ref(false)
-    const diagModalOpen = ref(false) // 端侧模型状态检测（与参数设置分离）
+    // 端侧模型检测报告浮层（锚定在顶栏胶囊下方，不再用模态框）
+    const diagOpen = ref(false)
+
+    // 展开 / 收起检测浮层（首次展开时顺带刷新一次）
+    function toggleDiagPanel(forceOpen = false) {
+      const next = forceOpen === true ? true : !diagOpen.value
+      diagOpen.value = next
+      if (next && aiStatus.value.prompt === 'checking' && !statusPromise) {
+        checkSystemAI()
+      }
+    }
+
+    // 检测条目：把状态映射成浮层里的列表（含检测中态）
+    const diagItems = computed(() => {
+      const s = aiStatus.value || {}
+      const checking = s.prompt === 'checking'
+      const pick = (ready, partial) => {
+        if (checking) return 'checking'
+        if (ready) return 'ok'
+        if (partial) return 'part'
+        return 'off'
+      }
+      const translatorReady = s.detectedAPIs?.Translator || s.translator === 'available'
+      const lmReady = s.detectedAPIs?.LanguageModel || s.prompt === 'available'
+      const detectorReady = s.detectedAPIs?.LanguageDetector || s.detector === 'available'
+      const textApiReady = s.detectedAPIs?.Summarizer || s.detectedAPIs?.Rewriter || s.detectedAPIs?.Writer
+      return [
+        { name: 'LanguageModel（对话模型）', sub: 'W3C Prompt API · 自由对话与全部工具依赖', state: pick(lmReady) },
+        { name: 'Translator（端侧翻译）', sub: 'W3C 独立小模型 · 中英互译优先调用', state: pick(translatorReady) },
+        { name: 'LanguageDetector（语种识别）', sub: 'W3C 规范 · 自动判断输入语言', state: pick(detectorReady) },
+        { name: 'Summarizer / Rewriter / Writer', sub: '高级文本生成 API · 摘要 / 润色 / 起草', state: pick(textApiReady, !textApiReady) },
+        { name: 'window.ai（早期命名空间）', sub: '旧版 Chromium 试验接口', state: pick(s.detectedAPIs?.windowAi) },
+      ]
+    })
     const roleModalOpen = ref(false)
     const openMenu = ref('') // 顶栏二级菜单：当前展开的分组 id
 
@@ -1432,10 +1465,21 @@ createApp({
       checkSystemAI()
 
       try {
-        // 点击顶栏菜单外部时收起二级菜单
+        // 点击外部时收起二级菜单与检测浮层
         document.addEventListener('click', (e) => {
-          if (typeof e.target?.closest === 'function' && e.target.closest('.nav-group')) return
-          openMenu.value = ''
+          const inNavGroup = typeof e.target?.closest === 'function' && e.target.closest('.nav-group')
+          if (!inNavGroup) openMenu.value = ''
+
+          const inDiag = typeof e.target?.closest === 'function' && e.target.closest('.diag-anchor')
+          if (!inDiag) diagOpen.value = false
+        })
+
+        // Esc 关闭检测浮层
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            diagOpen.value = false
+            openMenu.value = ''
+          }
         })
 
         // 视口跨越 1024px 断点时，自动切换侧边栏形态（展开 / 收起抽屉）
@@ -1474,7 +1518,9 @@ createApp({
       activeSessionId,
       sidebarOpen,
       settingsModalOpen,
-      diagModalOpen,
+      diagOpen,
+      toggleDiagPanel,
+      diagItems,
       roleModalOpen,
       ROLE_PRESETS,
       rolesInGroup,
