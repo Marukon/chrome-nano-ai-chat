@@ -152,6 +152,8 @@ createApp({
     const toast = ref('')
     let toastTimer = null
     const currentTokensSoFar = ref(0)
+    // 上下文窗口上限：先按常见默认值 4096 显示，
+    // 默认检测一旦读到模型真实窗口（如 9216）会自动覆盖
     const maxTokensLimit = ref(4096)
     // 滚动锁：只有用户停留在底部附近时才自动跟随最新内容
     const isNearBottom = ref(true)
@@ -364,6 +366,12 @@ createApp({
       statusPromise = ChromeAIService.checkStatus()
         .then(status => {
           aiStatus.value = status
+
+          // 检测阶段已读出真实上下文窗口，直接同步到左下角表盘；
+          // 当前若有活跃会话，以会话自身的读取结果为准（后续 syncTokenUsage 会覆盖）
+          if (status?.contextWindow && !activeAiSession.value) {
+            maxTokensLimit.value = status.contextWindow
+          }
           return status
         })
         .catch(err => {
@@ -382,20 +390,43 @@ createApp({
 
     /**
      * 同步上下文用量到 UI
+     *
      * 现行规范用 contextUsage / contextWindow，旧实现用 tokensSoFar / maxTokens，
-     * 驱动层已做归一。若实现完全不提供用量信息（hasUsage 为 false），
-     * 保持 UI 原值而不是写 0，避免表盘闪跳成 0。
+     * 驱动层已做归一。窗口上限有三级来源，按可靠性依次兜底：
+     *   1. 当前活跃会话的 contextWindow
+     *   2. 指纹采集阶段读到的 contextWindow（会话已销毁但值有效）
+     *   3. aiStatus 中缓存的窗口大小
+     * 这样避免「指纹能读到 9216，但左下角仍显示硬编码 4096」的错位。
      */
     function syncTokenUsage() {
       const usage = ChromeAIService.readTokenUsage(activeAiSession.value)
-      if (!usage.hasUsage) return
+
       if (typeof usage.used === 'number') {
         currentTokensSoFar.value = usage.used
       }
-      if (typeof usage.total === 'number' && usage.total > 0) {
-        maxTokensLimit.value = usage.total
+
+      // 窗口上限：会话读不到时，回退到指纹采集或状态缓存里的值
+      let total = typeof usage.total === 'number' && usage.total > 0 ? usage.total : 0
+      if (!total) {
+        total = modelUpdate.value.currentFp?.contextWindow
+          || aiStatus.value?.contextWindow
+          || 0
+      }
+      if (total > 0) {
+        maxTokensLimit.value = total
       }
     }
+
+    /** 上下文占用表盘的展示文案 */
+    const contextMeterText = computed(() => {
+      return `${currentTokensSoFar.value} / ${maxTokensLimit.value}`
+    })
+
+    /** 占用百分比：加除零保护，避免窗口异常时得到 NaN */
+    const contextMeterPercent = computed(() => {
+      if (!maxTokensLimit.value) return 0
+      return Math.min((currentTokensSoFar.value / maxTokensLimit.value) * 100, 100)
+    })
 
     // 采样档位：索引 ↔ 规范字符串，顺序与 UI 滑块的 0~6 严格对应
     const SAMPLING_MODES = [
@@ -1554,9 +1585,20 @@ createApp({
     /** 采集并保存当前模型指纹作为基线 */
     async function refreshModelFingerprint() {
       try {
-        const fp = await ChromeAIService.collectFingerprint(aiStatus.value)
+        const fp = await ChromeAIService.collectFingerprint(aiStatus.value, activeAiSession.value)
         saveModelFingerprint(fp)
         modelUpdate.value = Object.assign({}, modelUpdate.value, { currentFp: fp })
+
+        // 指纹里已读到真实上下文窗口，回写到状态与表盘，
+        // 否则会话销毁后左下角只能显示硬编码的默认值
+        if (fp?.contextWindow) {
+          aiStatus.value = Object.assign({}, aiStatus.value, {
+            contextWindow: fp.contextWindow,
+          })
+          if (!activeAiSession.value) {
+            maxTokensLimit.value = fp.contextWindow
+          }
+        }
         return fp
       } catch (e) {
         console.warn('[NanoAI] 指纹采集失败:', e)
@@ -1576,10 +1618,17 @@ createApp({
       modelUpdate.value = Object.assign({}, modelUpdate.value, { checking: true })
       try {
         const oldFp = loadModelFingerprint()
-        const res = await ChromeAIService.checkForUpdate(oldFp)
+        const res = await ChromeAIService.checkForUpdate(oldFp, activeAiSession.value)
 
         // 同步刷新 aiStatus，避免检测与状态不一致
         aiStatus.value = res.status
+
+        // 检测读到真实窗口时同步表盘，避免显示硬编码默认值
+        const win = res.fingerprint?.contextWindow
+        if (win) {
+          aiStatus.value = Object.assign({}, aiStatus.value, { contextWindow: win })
+          maxTokensLimit.value = win
+        }
 
         const banner = {
           checking: false,
@@ -2039,6 +2088,8 @@ createApp({
       forceScrollToBottom,
       currentTokensSoFar,
       maxTokensLimit,
+      contextMeterText,
+      contextMeterPercent,
       renderMarkdown,
       MODE_META,
       MODE_GROUPS,

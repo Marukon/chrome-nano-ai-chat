@@ -245,6 +245,22 @@ export class ChromeAIService {
       status.edgeChineseSupported = this.EDGE_OUTPUT_LANGS.includes('zh')
     }
 
+    // 1b. 上下文窗口：模型就绪时顺带建一次会话读出真实窗口大小，
+    //     这样默认检测就能把真实值（如 9216）交给 UI，无需用户手动触发指纹检测。
+    //     窗口是模型级属性，读完后立即销毁会话，不留副作用。
+    if (status.prompt === 'available') {
+      try {
+        const probeSession = await this.createChatSession({})
+        const usage = this.readTokenUsage(probeSession)
+        status.contextWindow = usage.total || null
+        status.samplingMode = this.readSamplingMode(probeSession)
+        probeSession?.destroy?.()
+      } catch (e) {
+        // 读窗口失败不影响整体状态判定，UI 会保留默认值
+        console.warn('[NanoAI] 上下文窗口探测失败:', e?.message || e)
+      }
+    }
+
     // 2. 文本生成类 API
     // Edge 的写作辅助 API 同样要求声明输出语言，不传会误判为「未开启」
     const genProbeOpts = status.edgeOutputLangs
@@ -310,23 +326,41 @@ export class ChromeAIService {
    *
    * 该指纹变化即提示「模型可能已更新」。
    */
-  static async collectFingerprint(status) {
+  static async collectFingerprint(status, reuseSession) {
     const ua = navigator.userAgent
     const chromeVer = (ua.match(/Chrome\/([\d.]+)/) || [])[1] || ''
     const edgeVer = (ua.match(/Edg\/([\d.]+)/) || [])[1] || ''
 
-    // contextWindow 需要真实建会话才能读到，故这里作为异步探测
-    let contextWindow = null
-    let samplingMode = null
-    try {
-      const session = await this.createChatSession({})
-      const usage = this.readTokenUsage(session)
-      contextWindow = usage.total
-      samplingMode = this.readSamplingMode(session)
-      session?.destroy?.()
-    } catch (e) {
-      // 模型未就绪时读不到窗口大小，指纹里保持 null，不阻断检测
-      console.warn('[NanoAI] 指纹采集：无法读取 contextWindow')
+    // contextWindow 来源按可靠性排序，避免重复建会话：
+    //   1. 调用方传入的活跃会话
+    //   2. checkStatus 已探测到的窗口（默认检测阶段就拿到了）
+    //   3. 兜底：临时建一次会话读取
+    let contextWindow = status?.contextWindow || null
+    let samplingMode = status?.samplingMode || null
+    let session = reuseSession || null
+    let createdTemp = false
+
+    if (!session && !contextWindow) {
+      try {
+        session = await this.createChatSession({})
+        createdTemp = true
+      } catch (e) {
+        // 模型未就绪时读不到窗口大小，指纹里保持 null，不阻断检测
+        console.warn('[NanoAI] 指纹采集：无法读取 contextWindow')
+      }
+    }
+
+    if (session) {
+      try {
+        const usage = this.readTokenUsage(session)
+        if (usage.total) contextWindow = usage.total
+        samplingMode = this.readSamplingMode(session)
+      } catch (e) {
+        console.warn('[NanoAI] 指纹采集：会话读取失败')
+      } finally {
+        // 只销毁我们自己创建的临时会话，绝不动调用方传进来的活跃会话
+        if (createdTemp) session.destroy?.()
+      }
     }
 
     const readyCount = status
@@ -387,7 +421,7 @@ export class ChromeAIService {
    * 「重新探测 + 与上次记录对比」，能发现：模型被更新、被替换、被移除。
    * 若 availability 回落为 downloadable，说明本地模型已不在，需重新下载。
    */
-  static async checkForUpdate(oldFp) {
+  static async checkForUpdate(oldFp, reuseSession) {
     const status = await this.checkStatus()
 
     // 模型缺失：需要重新下载
@@ -409,7 +443,7 @@ export class ChromeAIService {
       }
     }
 
-    const newFp = await this.collectFingerprint(status)
+    const newFp = await this.collectFingerprint(status, reuseSession)
     const diff = this.compareFingerprint(oldFp, newFp)
 
     return {

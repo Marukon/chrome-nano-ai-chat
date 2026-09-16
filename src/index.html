@@ -69,10 +69,10 @@
         <div class="token-meter">
           <div class="token-labels">
             <span>上下文占用</span>
-            <span>{{ currentTokensSoFar }} / {{ maxTokensLimit }}</span>
+            <span>{{ contextMeterText }}</span>
           </div>
           <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: Math.min((currentTokensSoFar / maxTokensLimit) * 100, 100) + '%' }"></div>
+            <div class="progress-fill" :style="{ width: contextMeterPercent + '%' }"></div>
           </div>
         </div>
       </div>
