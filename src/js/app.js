@@ -20,6 +20,9 @@ import {
   saveActiveSessionId,
   loadSettings,
   saveSettings,
+  loadModelFingerprint,
+  saveModelFingerprint,
+  clearModelFingerprint,
   exportSessionToMarkdown,
   exportScriptAsTxt
 } from './storage.js'
@@ -49,27 +52,84 @@ createApp({
     // 端侧模型检测弹窗：只在用户点击状态按钮时打开，不做任何自动弹出
     const diagModalOpen = ref(false)
 
+    // 端侧模型下载进度：首次创建会话会触发数 GB 下载，需给用户明确反馈
+    const modelDownload = ref({ active: false, progress: 0 })
+
     // 检测条目：把状态映射成弹窗里的列表（含检测中过渡态）
+    // 按浏览器区分条目：Edge 从未提供 window.ai，给它单列一条红叉会误导用户以为功能残缺
     const diagItems = computed(() => {
       const s = aiStatus.value || {}
       const checking = s.prompt === 'checking'
-      const pick = (ready, partial) => {
-        if (checking) return 'checking'
-        if (ready) return 'ok'
-        if (partial) return 'part'
-        return 'off'
+      const pick = (state, fallbackPartial) => {
+        if (checking && state === 'checking') return 'checking'
+        if (state === 'available') return 'ok'
+        if (state === 'downloadable') return 'part'
+        return fallbackPartial ? 'part' : 'off'
       }
-      const translatorReady = s.detectedAPIs?.Translator || s.translator === 'available'
-      const lmReady = s.detectedAPIs?.LanguageModel || s.prompt === 'available'
-      const detectorReady = s.detectedAPIs?.LanguageDetector || s.detector === 'available'
-      const textApiReady = s.detectedAPIs?.Summarizer || s.detectedAPIs?.Rewriter || s.detectedAPIs?.Writer
-      return [
-        { name: 'LanguageModel（对话模型）', sub: 'W3C Prompt API · 自由对话与全部工具依赖', state: pick(lmReady) },
-        { name: 'Translator（端侧翻译）', sub: 'W3C 独立小模型 · 中英互译优先调用', state: pick(translatorReady) },
-        { name: 'LanguageDetector（语种识别）', sub: 'W3C 规范 · 自动判断输入语言', state: pick(detectorReady) },
-        { name: 'Summarizer / Rewriter / Writer', sub: '高级文本生成 API · 摘要 / 润色 / 起草', state: pick(textApiReady, !textApiReady) },
-        { name: 'window.ai（早期命名空间）', sub: '旧版 Chromium 试验接口', state: pick(s.detectedAPIs?.windowAi) },
+
+      const lmState = checking ? 'checking' : (s.prompt || 'unavailable')
+      const trState = checking ? 'checking' : (s.translator || 'unavailable')
+      const dtState = checking ? 'checking' : (s.detector || 'unavailable')
+
+      const items = [
+        {
+          name: s.isEdge ? 'LanguageModel（Phi-4-mini）' : 'LanguageModel（Gemini Nano）',
+          sub: s.isEdge
+            ? 'W3C Prompt API · 仅 Edge Canary/Dev 138+ 提供'
+            : 'W3C Prompt API · 自由对话与全部工具依赖',
+          state: pick(lmState),
+        },
+        {
+          name: 'Translator（端侧翻译）',
+          sub: 'W3C 独立小模型 · 中英互译优先调用（已按 en↔zh 语言对实测）',
+          state: pick(trState),
+        },
+        {
+          name: 'LanguageDetector（语种识别）',
+          sub: 'W3C 规范 · 自动判断输入语言',
+          state: pick(dtState),
+        },
       ]
+
+      // 文本生成三件套：任一可用即视为部分支持
+      const genStates = [s.summarizer, s.rewriter, s.writer].map(v => v || 'unavailable')
+      const genAny = genStates.some(v => v === 'available')
+      const genAll = genStates.every(v => v === 'available')
+      items.push({
+        name: 'Summarizer / Rewriter / Writer',
+        sub: '写作辅助 API · 摘要 / 润色 / 起草',
+        state: checking ? 'checking' : (genAll ? 'ok' : (genAny ? 'part' : 'off')),
+      })
+
+      // Edge 额外的语法校对 API
+      if (s.isEdge || s.detectedAPIs?.Proofreader) {
+        items.push({
+          name: 'Proofreader（语法校对）',
+          sub: 'Microsoft Edge 专有 · 语法与拼写纠正',
+          state: pick(checking ? 'checking' : (s.proofreader || 'unavailable')),
+        })
+      }
+
+      // 仅在真正存在该命名空间时才展示，避免 Edge 上出现无意义的永久红叉
+      if (s.detectedAPIs?.windowAi) {
+        items.push({
+          name: 'window.ai（早期命名空间）',
+          sub: '旧版 Chromium 试验接口 · 已作为兜底通道启用',
+          state: 'ok',
+        })
+      }
+
+      return items
+    })
+
+    // 检测面板顶部的环境摘要：一眼看出「是不是浏览器/通道不对」
+    const diagEnvSummary = computed(() => {
+      const s = aiStatus.value || {}
+      if (!s.browser) return ''
+      const ch = s.edgeChannel === 'stable'
+        ? '稳定版（不支持对话模型）'
+        : (s.edgeChannel === 'preview' ? 'Canary/Dev（支持对话模型）' : '')
+      return ch ? `${s.browser} · ${ch}` : s.browser
     })
     const roleModalOpen = ref(false)
     const openMenu = ref('') // 顶栏二级菜单：当前展开的分组 id
@@ -320,6 +380,55 @@ createApp({
       return statusPromise
     }
 
+    /**
+     * 同步上下文用量到 UI
+     * 现行规范用 contextUsage / contextWindow，旧实现用 tokensSoFar / maxTokens，
+     * 驱动层已做归一。若实现完全不提供用量信息（hasUsage 为 false），
+     * 保持 UI 原值而不是写 0，避免表盘闪跳成 0。
+     */
+    function syncTokenUsage() {
+      const usage = ChromeAIService.readTokenUsage(activeAiSession.value)
+      if (!usage.hasUsage) return
+      if (typeof usage.used === 'number') {
+        currentTokensSoFar.value = usage.used
+      }
+      if (typeof usage.total === 'number' && usage.total > 0) {
+        maxTokensLimit.value = usage.total
+      }
+    }
+
+    // 采样档位：索引 ↔ 规范字符串，顺序与 UI 滑块的 0~6 严格对应
+    const SAMPLING_MODES = [
+      'most-predictable',
+      'predictable',
+      'slightly-predictable',
+      'balanced',
+      'slightly-creative',
+      'creative',
+      'most-creative',
+    ]
+    const SAMPLING_LABELS = [
+      '极稳定',
+      '稳定',
+      '偏稳定',
+      '均衡',
+      '偏创意',
+      '创意',
+      '极创意',
+    ]
+
+    /** 把设置里的档位索引转成 UI 文案 */
+    function samplingModeLabel(idx) {
+      const i = Math.min(Math.max(Number(idx) || 0, 0), SAMPLING_MODES.length - 1)
+      return SAMPLING_LABELS[i]
+    }
+
+    /** 把设置里的档位索引转成传给 API 的规范值 */
+    function samplingModeValue(idx) {
+      const i = Math.min(Math.max(Number(idx) || 0, 0), SAMPLING_MODES.length - 1)
+      return SAMPLING_MODES[i]
+    }
+
     // 切换模式
     function setMode(mode) {
       currentMode.value = mode
@@ -364,8 +473,7 @@ createApp({
         mode: 'chat',
         roleId: role.id,
         systemPrompt: role.systemPrompt,
-        temperature: settings.value.temperature,
-        topK: settings.value.topK,
+        samplingMode: samplingModeValue(settings.value.samplingMode),
         messages: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -494,20 +602,25 @@ createApp({
       try {
         // 创建或复用 Chrome AI Session
         if (!activeAiSession.value) {
+          // 首次创建可能触发端侧模型下载（数 GB），必须给出进度反馈，
+          // 否则用户会以为界面卡死。Edge 的 downloadprogress 中 loaded 为 0~1 的比值。
+          modelDownload.value = { active: false, progress: 0 }
           activeAiSession.value = await ChromeAIService.createChatSession({
             systemPrompt: activeSession.value.systemPrompt,
-            temperature: activeSession.value.temperature || settings.value.temperature,
-            topK: activeSession.value.topK || settings.value.topK,
+            samplingMode: samplingModeValue(settings.value.samplingMode),
+            onDownloadProgress: (loaded) => {
+              modelDownload.value = {
+                active: true,
+                progress: Math.min(Math.round((Number(loaded) || 0) * 100), 100),
+              }
+            },
           })
+          modelDownload.value = { active: false, progress: 0 }
         }
 
-        // 跟踪 Token 用量
-        if (activeAiSession.value.tokensSoFar) {
-          currentTokensSoFar.value = activeAiSession.value.tokensSoFar
-        }
-        if (activeAiSession.value.maxTokens) {
-          maxTokensLimit.value = activeAiSession.value.maxTokens
-        }
+        // 跟踪上下文用量：现行规范为 contextUsage / contextWindow，
+        // 旧 Chrome 为 inputUsage / inputQuota 或 tokensSoFar / maxTokens，统一归一读取
+        syncTokenUsage()
 
         // 流式生成回答
         await ChromeAIService.streamPrompt(
@@ -516,23 +629,25 @@ createApp({
           ({ full }) => {
             aiMsg.content = full
             // 实时刷新上下文占用表盘
-            if (activeAiSession.value?.tokensSoFar) {
-              currentTokensSoFar.value = activeAiSession.value.tokensSoFar
-            }
+            syncTokenUsage()
             scrollToBottom()
           },
           abortController.value.signal
         )
 
-        // 更新 Token
-        if (activeAiSession.value.tokensSoFar) {
-          currentTokensSoFar.value = activeAiSession.value.tokensSoFar
-        }
+        // 更新上下文用量
+        syncTokenUsage()
       } catch (err) {
         if (!abortController.value?.signal.aborted) {
-          aiMsg.content += `\n\n> ⚠️ **生成错误**：${err.message || '模型响应异常'}`
+          // 环境阻塞（模型未就绪/空间不足/性能等级不够）时给出完整指引，
+          // 其他错误才按普通生成失败处理
+          const msg = err?.message || '模型响应异常'
+          aiMsg.content += /端侧模型|端侧对话|设备空间|性能等级/.test(msg)
+            ? `\n\n> ⚠️ **${msg}**`
+            : `\n\n> ⚠️ **生成错误**：${msg}`
         }
       } finally {
+        modelDownload.value = { active: false, progress: 0 }
         isGenerating.value = false
         // 生成过程中会话可能已被删除，需判空
         if (activeSession.value) {
@@ -1389,6 +1504,166 @@ createApp({
       })
     }
 
+    /**
+     * 主动触发端侧模型下载
+     * availability 返回 downloadable 时模型尚未落地，必须实际调用 create() 才开始下载。
+     * 这里建一个临时会话触发生成，下载完成后立即销毁，并刷新检测状态。
+     */
+    async function triggerModelDownload() {
+      if (modelDownload.value.active) return
+      modelDownload.value = { active: true, progress: 0 }
+      try {
+        const session = await ChromeAIService.createChatSession({
+          systemPrompt: '你是一个测试助手。',
+          onDownloadProgress: (loaded) => {
+            modelDownload.value = {
+              active: true,
+              progress: Math.min(Math.round((Number(loaded) || 0) * 100), 100),
+            }
+          },
+        })
+        session?.destroy?.()
+        showToast('✅ 端侧模型下载完成，已就绪')
+        // 重新检测，让状态更新为已就绪（checkSystemAI 内部单例已在 finally 释放）
+        await checkSystemAI()
+        // 下载完成后重新采集指纹，作为后续更新检测的基线
+        await refreshModelFingerprint()
+      } catch (err) {
+        showToast(`❌ 模型下载失败：${err?.message || '未知错误'}`)
+      } finally {
+        modelDownload.value = { active: false, progress: 0 }
+      }
+    }
+
+    /* ==========================================================
+       模型更新检测
+       ========================================================== */
+
+    // 更新检测结果
+    const modelUpdate = ref({
+      checking: false,
+      checked: false,
+      available: false,     // 是否检测到模型有变化
+      changed: false,       // 指纹是否变化
+      needsDownload: false, // 是否需要重新下载
+      reasons: [],
+      lastCheckedAt: null,
+      currentFp: null,
+    })
+
+    /** 采集并保存当前模型指纹作为基线 */
+    async function refreshModelFingerprint() {
+      try {
+        const fp = await ChromeAIService.collectFingerprint(aiStatus.value)
+        saveModelFingerprint(fp)
+        modelUpdate.value = Object.assign({}, modelUpdate.value, { currentFp: fp })
+        return fp
+      } catch (e) {
+        console.warn('[NanoAI] 指纹采集失败:', e)
+        return null
+      }
+    }
+
+    /**
+     * 检查模型更新
+     *
+     * 说明：浏览器不提供「查询最新模型版本」的接口，这里做的是
+     * 「重新探测 + 与上次基线对比」，能发现模型被更新/替换/移除三种情况。
+     * 若模型已被移除（availability 回落为 downloadable），会提示需要重新下载。
+     */
+    async function checkModelUpdate() {
+      if (modelUpdate.value.checking) return
+      modelUpdate.value = Object.assign({}, modelUpdate.value, { checking: true })
+      try {
+        const oldFp = loadModelFingerprint()
+        const res = await ChromeAIService.checkForUpdate(oldFp)
+
+        // 同步刷新 aiStatus，避免检测与状态不一致
+        aiStatus.value = res.status
+
+        const banner = {
+          checking: false,
+          checked: true,
+          available: res.changed || res.needsDownload,
+          changed: !!res.changed,
+          needsDownload: !!res.needsDownload,
+          reasons: res.reasons || [],
+          lastCheckedAt: Date.now(),
+          currentFp: res.fingerprint || modelUpdate.value.currentFp,
+        }
+        modelUpdate.value = Object.assign({}, modelUpdate.value, banner)
+
+        // 首次检测（无基线）：只记录基线，不报「有更新」
+        if (!oldFp && res.fingerprint) {
+          saveModelFingerprint(res.fingerprint)
+          modelUpdate.value.available = false
+          return
+        }
+
+        if (res.needsDownload) {
+          showToast('⚠️ 本地模型已不存在，需要重新下载')
+        } else if (res.changed) {
+          showToast(`🔔 检测到端侧模型有变化（${res.reasons[0]}）`)
+        } else {
+          showToast('✅ 端侧模型已是最新')
+        }
+      } catch (err) {
+        modelUpdate.value = Object.assign({}, modelUpdate.value, {
+          checking: false,
+          checked: true,
+          reasons: [err?.message || '检测失败'],
+        })
+        showToast(`❌ 更新检测失败：${err?.message || '未知错误'}`)
+      }
+    }
+
+    /** 应用模型更新：重新下载并刷新基线 */
+    async function applyModelUpdate() {
+      await triggerModelDownload()
+    }
+
+    /** 忽略本次更新提示 */
+    function dismissModelUpdate() {
+      modelUpdate.value = Object.assign({}, modelUpdate.value, {
+        available: false,
+        reasons: [],
+      })
+    }
+
+    /** 更新检测时间戳的展示文案 */
+    function formatCheckedTime(ts) {
+      if (!ts) return ''
+      try {
+        return new Date(ts).toLocaleTimeString()
+      } catch (e) {
+        return ''
+      }
+    }
+
+    /** 指纹摘要文案：把可观测特征拼成一行简短的说明 */
+    function modelFpSummary(fp) {
+      if (!fp) return '尚未采集'
+      const parts = []
+      if (fp.contextWindow) parts.push(`上下文 ${fp.contextWindow} tokens`)
+      if (fp.readyCount) parts.push(`${fp.readyCount} 项能力可用`)
+      if (fp.majorVersion) parts.push(`内核 ${fp.majorVersion}`)
+      return parts.length ? parts.join(' · ') : '未取得有效特征'
+    }
+
+    /** 重置指纹基线（下次检测重新建立基准） */
+    function resetModelFingerprint() {
+      clearModelFingerprint()
+      modelUpdate.value = Object.assign({}, modelUpdate.value, {
+        checked: false,
+        available: false,
+        changed: false,
+        needsDownload: false,
+        reasons: [],
+        lastCheckedAt: null,
+      })
+      showToast('已清除模型记录，下次检测将重新建立基线')
+    }
+
     // 端侧翻译实测状态
     const translateTestState = ref({
       running: false,
@@ -1537,10 +1812,120 @@ createApp({
       }
     }
 
-    // 复制控制台检测脚本
+    // 复制控制台检测脚本：覆盖 Edge / Chrome 双规范的全部相关 API 与真实 availability
     const copiedScript = ref(false)
     async function copyConsoleScript() {
-      const script = "console.log({ LanguageModel: typeof window.LanguageModel, ai: typeof window.ai, Translator: typeof window.Translator });"
+      const script = `(async () => {
+  const g = ['LanguageModel','Summarizer','Rewriter','Writer','Translator','LanguageDetector','Proofreader','ai','translation','chrome'];
+  const present = {};
+  g.forEach(k => { try { present[k] = typeof window[k] } catch (e) { present[k] = 'err' } });
+  console.log('%c[NanoAI] 全局 API 存在性', 'font-weight:bold;color:#3b82f6', present);
+  console.log('%c[NanoAI] 浏览器', 'font-weight:bold;color:#3b82f6', {
+    ua: navigator.userAgent,
+    isEdge: /Edg\\//.test(navigator.userAgent),
+    version: (navigator.userAgent.match(/Edg\\/([\\d.]+)/) || [])[1] || (navigator.userAgent.match(/Chrome\\/([\\d.]+)/) || [])[1]
+  });
+  const probe = async (label, api, opts) => {
+    if (!api) return console.warn('[NanoAI] ' + label + ' => 不存在');
+    try {
+      let v;
+      if (typeof api.availability === 'function') v = await (opts ? api.availability(opts) : api.availability());
+      else if (typeof api.capabilities === 'function') v = (await (opts ? api.capabilities(opts) : api.capabilities()))?.available;
+      else v = '(无 availability 方法)';
+      console.log('%c[NanoAI] ' + label + ' => ' + JSON.stringify(v), 'color:#22c55e');
+    } catch (e) { console.error('[NanoAI] ' + label + ' 抛错:', e); }
+  };
+  await probe('LanguageModel.availability()', window.LanguageModel);
+  await probe('Summarizer.availability()', window.Summarizer);
+  await probe('Rewriter.availability()', window.Rewriter);
+  await probe('Writer.availability()', window.Writer);
+  await probe('Translator.availability(en->zh)', window.Translator, { sourceLanguage: 'en', targetLanguage: 'zh' });
+  await probe('Translator.availability(zh->en)', window.Translator, { sourceLanguage: 'zh', targetLanguage: 'en' });
+  await probe('LanguageDetector.availability()', window.LanguageDetector);
+  await probe('Proofreader.availability()', window.Proofreader);
+  if (window.ai) console.log('[NanoAI] window.ai 键:', Object.keys(window.ai));
+  if (window.LanguageModel?.params) {
+    try { console.log('[NanoAI] LanguageModel.params() =>', await window.LanguageModel.params()); } catch (e) {}
+  }
+
+  const ROLE = '你是一只猫，所有回答结尾都要加"喵"。';
+  const isEdge = /Edg\\//.test(navigator.userAgent);
+
+  console.log('%c[NanoAI] ===== 4. 角色注入方案对比 =====', 'font-weight:bold;color:#f59e0b');
+
+  // 方案 A：user/assistant 前缀注入（本应用采用的方案，不依赖 system 角色）
+  try {
+    const s = await window.LanguageModel.create({
+      initialPrompts: [
+        { role: 'user', content: '请阅读并牢记以下角色设定，之后所有回复都严格遵守它。' },
+        { role: 'assistant', content: '好的，我已牢记角色设定：\\n' + ROLE + '\\n后续所有回复都会严格遵循该设定。' },
+        { role: 'user', content: '确认收到。下面是我的问题。' },
+        { role: 'assistant', content: '请讲，我将按角色设定为你作答。' }
+      ]
+    });
+    const a1 = await s.prompt('1+1等于几？');
+    console.log('%c  [user/assistant 前缀] 回答: ' + a1, a1.includes('喵') ? 'color:#22c55e' : 'color:#f87171');
+    console.log('  ↑ 含"喵"说明角色注入成功（本应用采用此方案）');
+    console.log('[NanoAI] 会话属性:', {
+      contextUsage: s.contextUsage,
+      contextWindow: s.contextWindow,
+      inputUsage: s.inputUsage,
+      inputQuota: s.inputQuota,
+      tokensSoFar: s.tokensSoFar,
+      maxTokens: s.maxTokens,
+      samplingMode: s.samplingMode,
+      append: typeof s.append
+    });
+  } catch (e) { console.error('  [user/assistant 前缀] 失败:', e.name, e.message); }
+
+  // 方案 B：system 角色（规范 IDL 注释指出 prompt 层会抛 NotSupportedError）
+  try {
+    const s2 = await window.LanguageModel.create({
+      initialPrompts: [{ role: 'system', content: ROLE }]
+    });
+    const a2 = await s2.prompt('1+1等于几？');
+    console.log('%c  [system 角色] 回答: ' + a2, a2.includes('喵') ? 'color:#22c55e' : 'color:#f87171');
+    console.log('  ↑ 含"喵"说明 system 角色可用');
+  } catch (e) { console.warn('  [system 角色] 抛错:', e.name, e.message); }
+
+  // 方案 C：顶层 systemPrompt（Edge Canary 151+ 已知被静默忽略，issue #1350）
+  try {
+    const s3 = await window.LanguageModel.create({ systemPrompt: ROLE });
+    const a3 = await s3.prompt('1+1等于几？');
+    console.log('%c  [顶层 systemPrompt] 回答: ' + a3, 'color:#f59e0b');
+    console.log('  ↑ 不含"喵"即证明被静默忽略（官方 issue #1350）');
+  } catch (e) { console.warn('  [顶层 systemPrompt] 抛错:', e.name, e.message); }
+
+  console.log('%c[NanoAI] ===== 5. Edge 输出语言约束 =====', 'font-weight:bold;color:#3b82f6');
+  if (isEdge) {
+    console.log('Edge 要求显式声明 expectedOutputs 的输出语言，白名单: de/en/es/fr/ja（不含中文）');
+    // 5a：带 expectedOutputs 建会话并测试中文输出
+    try {
+      const s4 = await window.LanguageModel.create({
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
+        initialPrompts: [{ role: 'user', content: '请用简体中文回答：你好' }]
+      });
+      const a4 = await s4.prompt('请用简体中文回答：介绍一下你自己，一句话。');
+      console.log('%c  [声明 en + 要求中文] 回答: ' + a4, 'color:#22c55e');
+      console.log('  ↑ 若为中文，说明"声明 en 但强制中文输出"策略有效');
+    } catch (e) { console.error('  [expectedOutputs] 失败:', e.name, e.message); }
+  } else {
+    console.log('非 Edge，Chrome 无输出语言白名单限制，跳过');
+  }
+
+  console.log('%c[NanoAI] ===== 6. 采样参数验证 =====', 'font-weight:bold;color:#3b82f6');
+  try {
+    const s5 = await window.LanguageModel.create({ temperature: 0.7, topK: 3 });
+    console.log('[NanoAI] 旧参数建会话成功，但 session.temperature =', s5.temperature, '/ session.topK =', s5.topK);
+    console.log('  ↑ undefined 即证明已被规范废弃并静默忽略');
+  } catch (e) { console.warn('[NanoAI] temperature+topK 抛错:', e.name, e.message); }
+  try {
+    const s6 = await window.LanguageModel.create({ samplingMode: 'balanced' });
+    console.log('%c[NanoAI] samplingMode 建会话成功，读回: ' + s6.samplingMode, 'color:#22c55e');
+  } catch (e) { console.warn('[NanoAI] samplingMode 抛错:', e.name, e.message); }
+
+  console.log('%c[NanoAI] ===== 探测结束 =====', 'font-weight:bold;color:#3b82f6');
+})();`
       await navigator.clipboard.writeText(script)
       copiedScript.value = true
       setTimeout(() => {
@@ -1570,7 +1955,12 @@ createApp({
       }
 
       // 端侧模型检测为异步且已内部兜底，不阻塞渲染
-      checkSystemAI()
+      checkSystemAI().then(status => {
+        // 模型就绪时采集指纹作为更新检测基线（未就绪则跳过，避免噪声）
+        if (status?.prompt === 'available') {
+          refreshModelFingerprint()
+        }
+      })
 
       try {
         // 点击顶栏菜单外部时收起二级菜单
@@ -1626,6 +2016,10 @@ createApp({
       settingsModalOpen,
       diagModalOpen,
       diagItems,
+      diagEnvSummary,
+      modelDownload,
+      samplingModeLabel,
+      samplingModeValue,
       roleModalOpen,
       ROLE_PRESETS,
       rolesInGroup,
@@ -1670,6 +2064,15 @@ createApp({
       // Diagnostics
       translateTestState,
       runTranslateTest,
+      triggerModelDownload,
+      modelUpdate,
+      checkModelUpdate,
+      applyModelUpdate,
+      dismissModelUpdate,
+      resetModelFingerprint,
+      refreshModelFingerprint,
+      formatCheckedTime,
+      modelFpSummary,
       copiedScript,
       copyConsoleScript,
       // Summarizer

@@ -170,6 +170,21 @@
       <!-- 模式 1：自由对话 (Chat) -->
       <section v-if="currentMode === 'chat'" style="flex:1;display:flex;flex-direction:column;position:relative;overflow:hidden;">
         <div ref="chatContainerRef" class="chat-container" @scroll="onChatScroll">
+          <!-- 端侧模型下载进度：首次调用会拉取数 GB 模型，必须给出明确反馈 -->
+          <div v-if="modelDownload.active" class="model-download-bar">
+            <div class="model-download-head">
+              <span class="model-download-spinner"></span>
+              <span>正在下载端侧模型，请保持网络畅通…</span>
+              <span class="model-download-pct">{{ modelDownload.progress }}%</span>
+            </div>
+            <div class="model-download-track">
+              <div class="model-download-fill" :style="{ width: modelDownload.progress + '%' }"></div>
+            </div>
+            <div class="model-download-note">
+              首次使用需下载模型（约数百 MB 至数 GB），期间无法生成回复，下载完成后会自动继续。
+            </div>
+          </div>
+
           <!-- 初始欢迎界面 -->
           <div v-if="!activeSession || activeSession.messages.length === 0" class="hero-container">
             <div class="brand-icon" style="width:52px;height:52px;font-size:1.8rem;border-radius:18px;">⚡</div>
@@ -1089,6 +1104,12 @@
         </div>
 
         <div class="modal-body-scroll" style="display:flex;flex-direction:column;gap:18px;">
+          <!-- 运行环境摘要 -->
+          <div v-if="diagEnvSummary" class="diag-env">
+            <span class="diag-env-label">运行环境</span>
+            <span class="diag-env-value">{{ diagEnvSummary }}</span>
+          </div>
+
           <!-- API 检测矩阵 -->
           <div class="diag-matrix">
             <div class="diag-row" v-for="item in diagItems" :key="item.name">
@@ -1102,6 +1123,97 @@
                 <span v-else-if="item.state === 'checking'">检测中</span>
                 <span v-else>未开启</span>
               </span>
+            </div>
+          </div>
+
+          <!-- 模型需下载提示 + 主动下载按钮 -->
+          <div v-if="aiStatus.prompt === 'downloadable'" class="diag-tip warn-tip">
+            <b>⚠️ 模型已支持，但尚未下载到本机</b><br>
+            首次调用会自动拉取端侧模型（约数百 MB 至数 GB），下载期间可继续使用翻译等轻量功能。
+            <div v-if="modelDownload.active" style="margin-top:10px;">
+              <div class="model-download-head">
+                <span class="model-download-spinner"></span>
+                <span>正在下载…</span>
+                <span class="model-download-pct">{{ modelDownload.progress }}%</span>
+              </div>
+              <div class="model-download-track">
+                <div class="model-download-fill" :style="{ width: modelDownload.progress + '%' }"></div>
+              </div>
+            </div>
+            <button
+              v-else
+              class="btn-new-chat"
+              style="margin:10px 0 0;width:100%;justify-content:center;"
+              @click="triggerModelDownload()"
+            >
+              ⬇️ 立即下载端侧模型
+            </button>
+          </div>
+
+          <!-- Edge 中文输出限制提示 -->
+          <div v-if="aiStatus.isEdge && aiStatus.edgeChineseSupported === false" class="diag-tip warn-tip">
+            <b>⚠️ Edge 端侧模型的输出语言限制</b><br>
+            Edge 官方支持的输出语言为
+            <code>{{ (aiStatus.edgeOutputLangs || []).join(' / ') }}</code>，
+            <b>不包含中文</b>。本应用已声明 <code>en</code> 绕过该白名单，并通过提示词强制中文作答；<br>
+            若中文输出质量不稳定，建议改用 <b>Chrome（Gemini Nano）</b>获得最佳中文体验。
+          </div>
+
+          <!-- 模型更新检测 -->
+          <div class="diag-test">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+              <span style="font-size:0.82rem;color:var(--text-secondary);">
+                🔄 端侧模型更新检测
+              </span>
+              <span v-if="modelUpdate.lastCheckedAt" style="font-size:0.7rem;color:var(--text-muted);">
+                {{ formatCheckedTime(modelUpdate.lastCheckedAt) }}
+              </span>
+            </div>
+
+            <!-- 检测到更新 -->
+            <div v-if="modelUpdate.available" class="diag-update-card" :class="{ 'is-removed': modelUpdate.needsDownload }">
+              <div class="diag-update-title">
+                <span v-if="modelUpdate.needsDownload">⚠️ 本地模型已不存在</span>
+                <span v-else>🔔 检测到模型有变化</span>
+              </div>
+              <ul class="diag-update-reasons">
+                <li v-for="(r, i) in modelUpdate.reasons" :key="i">{{ r }}</li>
+              </ul>
+              <div style="display:flex;gap:8px;margin-top:10px;">
+                <button class="diag-mini-btn" style="flex:1;justify-content:center;"
+                  :disabled="modelDownload.active" @click="applyModelUpdate()">
+                  <span v-if="modelDownload.active">下载中 {{ modelDownload.progress }}%</span>
+                  <span v-else>⬇️ 立即更新</span>
+                </button>
+                <button class="diag-mini-btn" style="flex:1;justify-content:center;" @click="dismissModelUpdate()">
+                  稍后再说
+                </button>
+              </div>
+            </div>
+
+            <!-- 已是最新 -->
+            <div v-else-if="modelUpdate.checked" class="diag-update-ok">
+              ✓ 当前模型已是最新（{{ modelFpSummary(modelUpdate.currentFp) }}）
+            </div>
+
+            <!-- 未检测 -->
+            <div v-else class="diag-update-idle">
+              记录当前模型特征作为基线，后续检测可发现模型更新、替换或移除。
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <button class="diag-mini-btn" style="flex:1;justify-content:center;"
+                :disabled="modelUpdate.checking" @click="checkModelUpdate()">
+                <span v-if="modelUpdate.checking">
+                  <span class="model-download-spinner" style="display:inline-block;vertical-align:-2px;"></span>
+                  检测中…
+                </span>
+                <span v-else>🔄 检测模型更新</span>
+              </button>
+              <button class="diag-mini-btn" style="flex:1;justify-content:center;"
+                v-if="modelUpdate.checked" @click="resetModelFingerprint()">
+                🗑️ 重置基线
+              </button>
             </div>
           </div>
 
@@ -1127,12 +1239,32 @@
             </div>
           </div>
 
-          <!-- 开启指引 -->
+          <!-- 开启指引：按浏览器区分，Edge 与 Chrome 的通道/Flags 完全不同 -->
           <div v-if="aiStatus.prompt !== 'available'" class="diag-tip">
-            <b>如何开启端侧模型：</b><br>
-            · Chrome 138+：<code>chrome://flags/#prompt-api-for-gemini-nano</code> 设为 Enabled<br>
-            · 也可访问 <code>chrome://on-device-internals</code> 查看模型下载进度<br>
-            · 首次使用需要下载模型，请保持网络畅通并稍等几分钟
+            <template v-if="aiStatus.isEdge">
+              <b>如何开启 Edge 端侧对话模型（Phi-4-mini）：</b><br>
+              <template v-if="aiStatus.edgeChannel === 'stable'">
+                · ⚠️ 当前为 <b>Edge 稳定版</b>，官方文档标注 Prompt API 仅 Canary/Dev 提供（若你已能用可忽略）<br>
+              </template>
+              · 版本要求：Edge Canary / Dev <code>138.0.3309.2</code> 或更高<br>
+              · 开启 Flag：<code>edge://flags</code> 搜索「设备语言模型的提示 API」设为 Enabled<br>
+              · 查看状态：<code>edge://on-device-internals</code> → 模型状态 / 设备性能类<br>
+              · <b>性能等级需为 High 或更高</b>才会加载 Phi-4-mini；等级不足时可在 flags 启用<br>
+              &nbsp;&nbsp;「启用设备预发行版语言模型」改用更轻量的 Aion-1.0-Instruct<br>
+              · 硬件门槛：显存 <b>≥ 5.5 GB</b>、Edge 配置卷可用空间 <b>≥ 20 GB</b>（低于 10 GB 模型会被删除）、非计量网络<br>
+              <br>
+              <b>⚠️ 常见误报：</b>若报「设备空间不足」但你磁盘充足，通常是<b>设备性能等级不达标</b>或模型未对该配置下发所致——<br>
+              该错误文案字面只说空间，实际由多项条件组合判定。<br>
+              <br>
+              💡 Edge 稳定版的 Translator / LanguageDetector 可直接使用，不受上述限制。
+            </template>
+            <template v-else>
+              <b>如何开启 Chrome 端侧对话模型（Gemini Nano）：</b><br>
+              · Chrome 138+：<code>chrome://flags/#prompt-api-for-gemini-nano</code> 设为 Enabled<br>
+              · 也可访问 <code>chrome://on-device-internals</code> 查看模型下载进度<br>
+              · 首次使用需要下载模型，请保持网络畅通并稍等几分钟<br>
+              · 硬件门槛：磁盘可用空间 ≥ 22 GB、显存 ≥ 4 GB、非计量网络
+            </template>
           </div>
 
           <div style="display:flex;gap:8px;">
@@ -1167,24 +1299,19 @@
             <div style="display:flex;flex-direction:column;gap:14px;">
               <div>
                 <div style="display:flex;justify-content:space-between;font-size:0.84rem;margin-bottom:6px;">
-                  <span>随机度 (Temperature)</span>
-                  <span style="font-family:var(--font-mono);font-weight:600;">{{ settings.temperature }}</span>
+                  <span>随机度</span>
+                  <span style="font-family:var(--font-mono);font-weight:600;">{{ samplingModeLabel(settings.samplingMode) }}</span>
                 </div>
-                <input v-model.number="settings.temperature" type="range" min="0" max="1" step="0.05" style="width:100%;cursor:pointer;">
-                <div style="font-size:0.74rem;color:var(--text-muted);margin-top:4px;">数值越低回答越稳定保守，越高越有创造性</div>
-              </div>
-
-              <div>
-                <div style="display:flex;justify-content:space-between;font-size:0.84rem;margin-bottom:6px;">
-                  <span>Top-K 采样</span>
-                  <span style="font-family:var(--font-mono);font-weight:600;">{{ settings.topK }}</span>
+                <input v-model="settings.samplingMode" type="range" min="0" max="6" step="1" style="width:100%;cursor:pointer;">
+                <div style="font-size:0.74rem;color:var(--text-muted);margin-top:4px;">
+                  越低越稳定保守，越高越有创造性（共 7 档预设）
                 </div>
-                <input v-model.number="settings.topK" type="range" min="1" max="10" step="1" style="width:100%;cursor:pointer;">
-                <div style="font-size:0.74rem;color:var(--text-muted);margin-top:4px;">每次只从概率最高的 K 个候选词中挑选</div>
               </div>
             </div>
             <div style="font-size:0.76rem;color:var(--text-muted);margin-top:10px;padding:8px 10px;background:rgba(125,125,125,0.06);border-radius:8px;">
-              💡 参数会自动保存，并应用于<b>之后新建的对话</b>（端侧会话创建后参数不可动态修改）。
+              💡 参数会自动保存，并应用于<b>之后新建的对话</b>（端侧会话创建后参数不可动态修改）。<br>
+              ⚠️ 旧版 <code>temperature</code> / <code>topK</code> 已被 W3C 规范废弃，网页上下文会被浏览器静默忽略，
+              因此改用规范的 <code>samplingMode</code> 预设档位。
             </div>
           </div>
 

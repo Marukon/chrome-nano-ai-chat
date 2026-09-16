@@ -7,13 +7,48 @@ const STORAGE_KEYS = {
   SESSIONS: 'nano_ai_sessions_v1',
   ACTIVE_ID: 'nano_ai_active_id_v1',
   SETTINGS: 'nano_ai_settings_v1',
+  MODEL_FINGERPRINT: 'nano_ai_model_fp_v1',
 }
 
 const DEFAULT_SETTINGS = {
   theme: 'auto', // 'auto' | 'light' | 'dark'
-  temperature: 0.7,
-  topK: 3,
+  // W3C 现行规范用 samplingMode 预设档位；temperature/topK 已废弃（网页上下文被静默忽略）
+  samplingMode: 3, // 0~6，默认 balanced
   defaultRole: 'general',
+}
+
+/**
+ * 模型指纹：用于间接判断端侧模型是否发生变化
+ *
+ * Prompt API 没有提供「查询模型版本」或「检查更新」的接口，
+ * 因此只能记录上一次模型就绪时的特征签名，后续对比：
+ *  - 指纹变化 → 模型被更新或替换
+ *  - 状态回落为 downloadable → 模型被移除，需要重新下载
+ */
+export function loadModelFingerprint() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.MODEL_FINGERPRINT)
+    return raw ? JSON.parse(raw) : null
+  } catch (e) {
+    console.error('Failed to load model fingerprint:', e)
+    return null
+  }
+}
+
+export function saveModelFingerprint(fp) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.MODEL_FINGERPRINT, JSON.stringify(fp))
+  } catch (e) {
+    console.error('Failed to save model fingerprint:', e)
+  }
+}
+
+export function clearModelFingerprint() {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.MODEL_FINGERPRINT)
+  } catch (e) {
+    console.error('Failed to clear model fingerprint:', e)
+  }
 }
 
 export function loadSettings() {
